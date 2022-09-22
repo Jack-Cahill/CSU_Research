@@ -8,9 +8,12 @@ import xarray as xr
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
+# Specify variable
+var = 'olr'
+
 # Read in data
-df = xr.open_dataset('/Users/jcahill4/DATA/prcp/Obs/clima_gefs/clima_prcp.nc')
-df = df['prcp']
+df = xr.open_dataset('/Users/jcahill4/DATA/{}/Obs/clima_gefs/clima_{}.nc'.format(var, var))
+df = df['{}'.format(var)]
 
 # define lats and lons
 lats = df.lat.values  # lat is latitude name given by data
@@ -28,14 +31,17 @@ ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
 ax.set_extent([-140, 110, -25, 75], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
 
 # Contours levels
-clevs = np.arange(-35, 35.5, .5)  # prcp clima
+if var == 'prcp':
+    clevs = np.arange(-35, 35.5, .5)  # prcp clima
+else:
+    clevs = np.arange(-350, 355, 5)  # olr clima
 
 # Colorbar
 cf = ax.contourf(lons, lats, Day1_vals, clevs, cmap=plt.cm.bwr, transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)  # aspect=50 flattens cbar
 
 # Set title
-ax.set_title('Precip Plot - Git Practice', fontsize=16)
+ax.set_title('{} Plot - Git Practice'.format(var), fontsize=16)
 
 # Set x and y labels
 ax.set_yticks([0, 25, 50])  # at a specific latitude
@@ -50,5 +56,5 @@ ax.add_feature(cfeature.LAKES.with_scale('50m'), color='black', linewidths=0.5)
 
 # Output
 plt.tight_layout()
-plt.savefig('GitMapPractice', dpi=300)
+plt.savefig('GitMapPractice_{}'.format(var), dpi=300)
 plt.show()
