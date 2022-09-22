@@ -34,6 +34,9 @@ clevs = np.arange(-35, 35.5, .5)  # prcp clima
 cf = ax.contourf(lons, lats, Day1_vals, clevs, cmap=plt.cm.bwr, transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)  # aspect=50 flattens cbar
 
+# Set title
+ax.set_title('Precip Plot - Git Practice', fontsize=16)
+
 # Set x and y labels
 ax.set_yticks([0, 25, 50])  # at a specific latitude
 ax.set_yticklabels(['0\N{DEGREE SIGN}', '25\N{DEGREE SIGN}N', '25\N{DEGREE SIGN}N'])
