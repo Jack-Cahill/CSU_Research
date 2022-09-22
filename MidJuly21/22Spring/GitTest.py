@@ -34,6 +34,12 @@ clevs = np.arange(-35, 35.5, .5)  # prcp clima
 cf = ax.contourf(lons, lats, Day1_vals, clevs, cmap=plt.cm.bwr, transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)  # aspect=50 flattens cbar
 
+# Set x and y labels
+ax.set_yticks([0, 25, 50])  # at a specific latitude
+ax.set_yticklabels(['0\N{DEGREE SIGN}', '25\N{DEGREE SIGN}N', '25\N{DEGREE SIGN}N'])
+ax.set_xticks([-120, -60, 0, 60])  # at a specific longitude
+ax.set_xticklabels(['60\N{DEGREE SIGN}E', '120\N{DEGREE SIGN}E', '0\N{DEGREE SIGN}', '120\N{DEGREE SIGN}W'])
+
 # Add extra features
 ax.grid(linestyle='dotted', linewidth=2)
 ax.add_feature(cfeature.COASTLINE.with_scale('50m'))
