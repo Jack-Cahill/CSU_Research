@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 Created on Thu Jul 28 09:38:16 2022
 
@@ -9,10 +7,7 @@ Created on Thu Jul 28 09:38:16 2022
 import geopandas as gp
 import tensorflow as tf
 import sys
-
-sys.path.append('')  # add path to network, metrics and plot
 import numpy as np
-# from tensorflow.keras.datasets import mnist
 import xarray as xr
 import glob
 import pandas as pd
@@ -20,20 +15,15 @@ import time
 import matplotlib.pyplot as plt
 import cmasher as cmr
 from sklearn import preprocessing
-from tensorflow import keras
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-# from shapely.errors import ShapelyDeprecationWarning
 import warnings
-
-warnings.filterwarnings('ignore', "GeoSeries.isna", UserWarning)
-# import warnings; warnings.filterwarnings('ignore', "", ShapelyDeprecationWarning)
-warnings.simplefilter(action='ignore', category=FutureWarning)
-import datetime as dt
-from datetime import timedelta
-from tensorflow.keras import regularizers
 import matplotlib.colors as colors
-import datetime
+from Functions import defineNN, PredictionAccuracy, CategoricalTruePositives
+
+sys.path.append('')  # add path to network, metrics and plot
+warnings.filterwarnings('ignore', "GeoSeries.isna", UserWarning)
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 pd.set_option("display.max_rows", None, "display.max_columns", None)
 plt.style.use('dark_background')
@@ -48,242 +38,20 @@ cmap = plt.get_cmap('cmr.redshift')  # MPL
 
 # If you want maps to include correct and incorrect top confidences uncomment CONLY
 
-# %%
-
-def autolabel(rects):
-    for rect in rects:
-        height = rect.get_height()
-        plt.text(rect.get_x() + rect.get_width() / 2., .99 * height,
-                 '%d' % int((height * 108 * .01) / .75),
-                 ha='center', va='bottom')
-
-
-class CategoricalTruePositives(keras.metrics.Metric):
-    def __init__(self, name="categorical_true_positives", **kwargs):
-        super(CategoricalTruePositives, self).__init__(name=name, **kwargs)
-        self.true_positives = self.add_weight(name="ctp", initializer="zeros")
-
-    def update_state(self, y_true, y_pred, sample_weight=None):
-        y_pred = tf.reshape(tf.argmax(y_pred, axis=1), shape=(-1, 1))
-        values = tf.cast(y_true, "int32") == tf.cast(y_pred, "int32")
-        values = tf.cast(values, "float32")
-        if sample_weight is not None:
-            sample_weight = tf.cast(sample_weight, "float32")
-            values = tf.multiply(values, sample_weight)
-        self.true_positives.assign_add(tf.reduce_sum(values))
-
-    def result(self):
-        return self.true_positives
-
-    def reset_state(self):
-        # The state of the metric will be reset at the start of each epoch.
-        self.true_positives.assign(0.0)
-
-
-# >>>>> NN Architecture >>>>>
-def defineNN(hidden, input1_shape, output_shape, ridge_penalty1=0., lasso_penalty1=0.,
-             dropout=0., act_fun='relu', network_seed=99):
-    input1 = tf.keras.Input(shape=input1_shape)
-    if dropout > 0.:
-        input_dropout = tf.keras.layers.Dropout(rate=dropout, seed=network_seed)(input1)
-        x = tf.keras.layers.Dense(hidden[0],
-                                  activation=act_fun,
-                                  use_bias=True,
-                                  kernel_regularizer=regularizers.l1_l2(l1=lasso_penalty1, l2=ridge_penalty1),
-                                  bias_initializer=tf.keras.initializers.RandomNormal(seed=network_seed),
-                                  kernel_initializer=tf.keras.initializers.RandomNormal(seed=network_seed)
-                                  )(input_dropout)
-    else:
-        x = tf.keras.layers.Dense(hidden[0],
-                                  activation=act_fun,
-                                  use_bias=True,
-                                  kernel_regularizer=regularizers.l1_l2(l1=lasso_penalty1, l2=ridge_penalty1),
-                                  bias_initializer=tf.keras.initializers.RandomNormal(seed=network_seed),
-                                  kernel_initializer=tf.keras.initializers.RandomNormal(seed=network_seed)
-                                  )(input1)
-
-    # initialize other layers
-    '''for layer in hidden[1:]:
-        x = tf.keras.layers.Dense(layer,
-                                  activation = act_fun,
-                                  use_bias = True, 
-                                  kernel_regularizer = regularizers.l1_l2(l1=0.0, l2=0.0),
-                                  bias_initializer = tf.keras.initializers.RandomNormal(seed=network_seed),
-                                  kernel_initializer = tf.keras.initializers.RandomNormal(seed=network_seed)
-                                  )(x)'''
-
-    # initialize output layer w/ softmax
-    output_layer = tf.keras.layers.Dense(output_shape,
-                                         activation=tf.keras.activations.softmax,
-                                         # activation = act_fun,
-                                         use_bias=True,
-                                         kernel_regularizer=regularizers.l1_l2(l1=0.0, l2=0.0),
-                                         bias_initializer=tf.keras.initializers.RandomNormal(seed=network_seed),
-                                         kernel_initializer=tf.keras.initializers.RandomNormal(seed=network_seed)
-                                         )(x)
-    # output_layer = tf.keras.activations.softmax(output_layer)
-
-    # create model
-    model = tf.keras.Model(inputs=input1, outputs=output_layer)
-
-    return model
-
-
-# <<<<< NN Architecture <<<<<
-
-
-# ------------------------------------------------------------------------
-# CLASSES
-#
-#   The following metrics classes are tensorflow compliant.
-#
-#   See page 390 of Geron, 2019, for a prototype of a metric class. See also,
-#   https://www.tensorflow.org/api_docs/python/tf/keras/metrics/Metric.
-# ------------------------------------------------------------------------
-
-class PredictionAccuracy(tf.keras.metrics.Metric):
-    """Compute the prediction accuracy for an epoch.
-​
-    The prediction accuracy does not include abstentions. The prediction
-    accuracy is the total number of correct predictions divided by the
-    total number of predictions, across the entire epoch. This is not the
-    same as the average of batch prediction accuracies.
-​
-    The computation is done by maintaining running sums of total predictions
-    and correct predictions made across all batches in an epoch. The running
-    sums are reset at the end of each epoch.
-
-    """
-
-    def __init__(self, abstain, **kwargs):
-        super().__init__(**kwargs)
-        self.abstain = abstain
-        self.correct = self.add_weight("correct", initializer="zeros")
-        self.total = self.add_weight("total", initializer="zeros")
-
-    def update_state(self, y_true, y_pred, sample_weight=None):
-        cat_pred = tf.math.argmax(y_pred, axis=-1)
-        cat_true = tf.math.argmax(y_true, axis=-1)
-
-        mask = tf.math.not_equal(cat_pred, self.abstain)
-        cat_pred = tf.boolean_mask(cat_pred, mask)
-        cat_true = tf.boolean_mask(cat_true, mask)
-
-        batch_correct = tf.math.count_nonzero(tf.math.equal(cat_pred, cat_true))
-        batch_total = tf.math.count_nonzero(mask)
-
-        self.correct.assign_add(tf.cast(batch_correct, tf.float32))
-        self.total.assign_add(tf.cast(batch_total, tf.float32))
-
-    def result(self):
-        return self.correct / self.total
-
-    def get_config(self):
-        base_config = super().get_config()
-        return {**base_config}
-
-
-def get_gradients(inputs, top_pred_idx=None, pred_old=None):
-    """Computes the gradients of outputs w.r.t input image.
-
-    Args:
-        inputs: 2D/3D/4D matrix of samples
-        top_pred_idx: (optional) Predicted label for the x_data
-                      if classification problem. If regression,
-                      do not include.
-
-    Returns:
-        Gradients of the predictions w.r.t img_input
-    """
-    inputs = tf.cast(inputs, tf.float32)
-
-    with tf.GradientTape() as tape:
-        tape.watch(inputs)
-
-        # Run the forward pass of the layer and record operations
-        # on GradientTape.
-        if pred_old is not None:
-            preds = pred_old
-        else:
-            preds = model(inputs, training=False)
-
-            # For classification, grab the top class
-        if top_pred_idx is not None:
-            preds = preds[:, top_pred_idx]
-
-    # Use the gradient tape to automatically retrieve
-    # the gradients of the trainable variables with respect to the loss.        
-    grads = tape.gradient(preds, inputs)
-    return grads
-
-
-def get_integrated_gradients(inputs, baseline=None, num_steps=50, top_pred_idx=None):
-    """Computes Integrated Gradients for a prediction.
-
-    Args:
-        inputs (ndarray): 2D/3D/4D matrix of samples
-        baseline (ndarray): The baseline image to start with for interpolation
-        num_steps: Number of interpolation steps between the baseline
-            and the input used in the computation of integrated gradients. These
-            steps along determine the integral approximation error. By default,
-            num_steps is set to 50.
-        top_pred_idx: (optional) Predicted label for the x_data
-                      if classification problem. If regression,
-                      do not include.            
-
-    Returns:
-        Integrated gradients w.r.t input image
-    """
-    # If baseline is not provided, start with zeros
-    # having same size as the input image.
-    if baseline is None:
-        input_size = np.shape(inputs)[1:]
-        baseline = np.zeros(input_size).astype(np.float32)
-    else:
-        baseline = baseline.astype(np.float32)
-
-    # 1. Do interpolation.
-    inputs = inputs.astype(np.float32)
-    interpolated_inputs = [
-        baseline + (step / num_steps) * (inputs - baseline)
-        for step in range(num_steps + 1)]
-    interpolated_inputs = np.array(interpolated_inputs).astype(np.float32)
-
-    # 3. Get the gradients
-    grads = []
-    for i, x_data in enumerate(interpolated_inputs):
-        grad = get_gradients(x_data, top_pred_idx=top_pred_idx)
-        grads.append(grad[0])
-    grads = tf.convert_to_tensor(grads, dtype=tf.float32)
-
-    # 4. Approximate the integral using the trapezoidal rule
-    grads = (grads[:-1] + grads[1:]) / 2.0
-    avg_grads = tf.reduce_mean(grads, axis=0)
-
-    # 5. Calculate integrated gradients and return
-    integrated_grads = (inputs - baseline) * avg_grads
-    return integrated_grads
-
-
 # %% -------------------------------- INPUTS --------------------------------
-Trash = 0
+
+# Define a set of random seeds (or just one seed if you want to check)
 # r = np.arange(88, 89, 1)
 r = [92, 95, 100, 137, 141, 142]
-# r = np.arange(75, 125, 1)
-# r = np.arange(90, 130, 1)
-# r = np.arange(40, 46, 1)
 
-# Trim
-Trim = 14  # determines where we cut off the big map (14, 19, 24 or 0 - for non-combined LTs in big map)
-
-# Map
+# Define Input Map variable
 variable = 'olr'
 if variable == 'olr':
     lat_slice = slice(-25, 25)  # lat and lon region make up the Tropics
     lon_slice = slice(60, 300)
     Map = 1
 elif variable == 'u200':
-    lat_slice = slice(0, 75)  # lat and lon region make up the Tropics
+    lat_slice = slice(0, 75)  # lat and lon region make up NH over Pacific
     lon_slice = slice(120, 300)
     Map = 2
 
@@ -441,9 +209,9 @@ i = 0
 while i < len(mdata_ymd['Amp']):
     if mdata_ymd['Amp'][i] < 1.0:
         mdata_ymd['M_Phase'][i] = 0
-        i = i+1
+        i = i + 1
     else:
-        i = i+1
+        i = i + 1
 
 # Drop Y-M-D
 mdata_ymd = mdata_ymd.drop(['year', 'month', 'day'], axis=1)
@@ -521,7 +289,7 @@ if adj4 != 0:
 states = gp.read_file('/Users/jcahill4/DATA/Udders/usa-states-census-2014.shp')
 states.crs = 'EPSG:4326'
 
-NW = states[states['STUSPS'].isin(['WA','OR','ID'])]
+NW = states[states['STUSPS'].isin(['WA', 'OR', 'ID'])]
 us_boundary_map = states.boundary.plot(color="white", linewidth=1)
 
 ### Convert lat and lons into grid pts
@@ -1286,6 +1054,7 @@ def savitzky_golay(y, window_size, order, deriv=0, rate=1):
     y = np.concatenate((firstvals, y, lastvals))
     return np.convolve(m[::-1], y, mode='valid')
 
+
 # %%
 # Speicify which class we're interested in
 class_num = 0
@@ -1296,7 +1065,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs = idx_all.loc[idx_all['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
-        hmap_main[x+1, y] = len(MJO_ENSO['idx'])
+        hmap_main[x + 1, y] = len(MJO_ENSO['idx'])
 print(hmap_main)
 
 for xy in range(counter):
@@ -1317,7 +1086,7 @@ for xy in range(counter):
 # Separate based on class and correct samples
 info_all_all = pd.DataFrame({'idx': flat_idx_all, 'CorrOrNo': flat_CNO_all, 'Class': flat_CLS_all})
 info_all_corr = info_all_all[info_all_all['CorrOrNo'] == 1].reset_index(drop=True)
-info_class_all = info_all_all[info_all_all['Class'] == class_num] .reset_index(drop=True)
+info_class_all = info_all_all[info_all_all['Class'] == class_num].reset_index(drop=True)
 info_class_corr = info_class_all[info_class_all['CorrOrNo'] == 1].reset_index(drop=True)
 
 # Count indices
@@ -1331,12 +1100,12 @@ info_all_corr_count_df = info_all_corr_count.to_frame()
 info_class_all_count_df = info_class_all_count.to_frame()
 info_class_corr_count_df = info_class_corr_count.to_frame()
 
-info_all_all_idx = info_all_all_count_df.index                              # Indices
+info_all_all_idx = info_all_all_count_df.index  # Indices
 info_all_corr_idx = info_all_corr_count_df.index
 info_class_all_idx = info_class_all_count_df.index
 info_class_corr_idx = info_class_corr_count_df.index
 
-info_all_all_count = info_all_all_count_df['idx'].reset_index(drop=True)     # Count
+info_all_all_count = info_all_all_count_df['idx'].reset_index(drop=True)  # Count
 info_all_corr_count = info_all_corr_count_df['idx'].reset_index(drop=True)
 info_class_all_count = info_class_all_count_df['idx'].reset_index(drop=True)
 info_class_corr_count = info_class_corr_count_df['idx'].reset_index(drop=True)
@@ -1360,7 +1129,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs = EMJO_class_all.loc[EMJO_class_all['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
-        hmap[x+1, y] = len(MJO_ENSO['idx'])
+        hmap[x + 1, y] = len(MJO_ENSO['idx'])
 hmap = hmap / hmap_main
 print(hmap)
 
@@ -1372,7 +1141,9 @@ plt.xticks([0, 1, 2, 3, 4, 5, 6, 7, 8], ['None', 1, 2, 3, 4, 5, 6, 7, 8])
 plt.yticks([0, 1, 2], ['La Niña', 'Neutral', 'El Niño'])
 plt.colorbar(shrink=0.75, label='Frequency')
 plt.tight_layout()
-plt.savefig('HeatmapClass{}_{}_Lt{}{}N{}Lr{}'.format(class_num, Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]), dpi=300)
+plt.savefig(
+    'HeatmapClass{}_{}_Lt{}{}N{}Lr{}'.format(class_num, Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
+    dpi=300)
 plt.show()
 
 hmapCN = np.zeros((3, 9))
@@ -1380,7 +1151,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs_CN = EMJO_class_corr.loc[EMJO_class_corr['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO_CN = ENSOs_CN.loc[ENSOs_CN['M_Phase'] == y]
-        hmapCN[x+1, y] = len(MJO_ENSO_CN['idx'])
+        hmapCN[x + 1, y] = len(MJO_ENSO_CN['idx'])
 hmapCN = hmapCN / hmap_main
 print(hmapCN)
 
@@ -1392,7 +1163,9 @@ plt.xticks([0, 1, 2, 3, 4, 5, 6, 7, 8], ['None', 1, 2, 3, 4, 5, 6, 7, 8])
 plt.yticks([0, 1, 2], ['La Niña', 'Neutral', 'El Niño'])
 plt.colorbar(shrink=0.75, label='Frequency')
 plt.tight_layout()
-plt.savefig('HeatmapClass{}Corr_{}_Lt{}{}N{}Lr{}'.format(class_num, Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]), dpi=300)
+plt.savefig(
+    'HeatmapClass{}Corr_{}_Lt{}{}N{}Lr{}'.format(class_num, Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
+    dpi=300)
 plt.show()
 
 hmap_all_all = np.zeros((3, 9))
@@ -1400,7 +1173,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs_CN = EMJO_all_all.loc[EMJO_all_all['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO_CN = ENSOs_CN.loc[ENSOs_CN['M_Phase'] == y]
-        hmap_all_all[x+1, y] = len(MJO_ENSO_CN['idx'])
+        hmap_all_all[x + 1, y] = len(MJO_ENSO_CN['idx'])
 hmap_all_all = hmap_all_all / hmap_main
 print(hmap_all_all)
 
@@ -1412,7 +1185,8 @@ plt.xticks([0, 1, 2, 3, 4, 5, 6, 7, 8], ['None', 1, 2, 3, 4, 5, 6, 7, 8])
 plt.yticks([0, 1, 2], ['La Niña', 'Neutral', 'El Niño'])
 plt.colorbar(shrink=0.75, label='Frequency')
 plt.tight_layout()
-plt.savefig('Heatmap_all_all_Corr_{}_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]), dpi=300)
+plt.savefig('Heatmap_all_all_Corr_{}_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
+            dpi=300)
 plt.show()
 
 hmap_all_corr = np.zeros((3, 9))
@@ -1420,7 +1194,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs_CN = EMJO_all_corr.loc[EMJO_all_corr['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO_CN = ENSOs_CN.loc[ENSOs_CN['M_Phase'] == y]
-        hmap_all_corr[x+1, y] = len(MJO_ENSO_CN['idx'])
+        hmap_all_corr[x + 1, y] = len(MJO_ENSO_CN['idx'])
 hmap_all_corr = hmap_all_corr / hmap_main
 print(hmap_all_corr)
 
@@ -1432,10 +1206,9 @@ plt.xticks([0, 1, 2, 3, 4, 5, 6, 7, 8], ['None', 1, 2, 3, 4, 5, 6, 7, 8])
 plt.yticks([0, 1, 2], ['La Niña', 'Neutral', 'El Niño'])
 plt.colorbar(shrink=0.75, label='Frequency')
 plt.tight_layout()
-plt.savefig('Heatmap_all_corr_Corr_{}_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]), dpi=300)
+plt.savefig('Heatmap_all_corr_Corr_{}_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
+            dpi=300)
 plt.show()
-
-
 
 # %%
 # Utilize counter
@@ -1458,10 +1231,8 @@ for xyz in range(counter):
     # Merge all the grids together
     if xyz == 0:
         countmerg1 = over3p_1  # if doing 3+ switch count1pd with over3p_1 - this line and one below it
-    else:                      # if not doing 3+ switch over3p_1 with count1pd
+    else:  # if not doing 3+ switch over3p_1 with count1pd
         countmerg1 = pd.merge(countmerg1, over3p_1, on='idx')
-
-
 
 # Merge with the main index df and drop count columns
 common_idx = pd.merge(countmerg1, idx_all, on='idx')
@@ -1472,7 +1243,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs = common_idx.loc[common_idx['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
-        hmap3p[x+1, y] = len(MJO_ENSO['idx'])
+        hmap3p[x + 1, y] = len(MJO_ENSO['idx'])
 hmap3p = hmap3p / hmap_main
 print(hmap3p)
 
