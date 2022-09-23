@@ -42,7 +42,7 @@ cmap = plt.get_cmap('cmr.redshift')  # MPL
 
 # Define a set of random seeds (or just one seed if you want to check)
 r = [92, 95, 100, 137, 141, 142]
-# r = np.arange(88, 89, 1)
+r = np.arange(88, 89, 1)
 
 # Define Input Map variable
 variable = 'olr'
@@ -68,33 +68,22 @@ bignum = 862  # selects testing / training data
 smlnum = 180  # " "
 LT_tot = 35  # how many total lead times are there?
 
+# Decrease input resolution?
+dec = 0  # 0 if normal, 1 if decrease
+
 # Whole map or just a subset?
-adj4 = 2  # 0 is no, 1 is for SW, 2, is for NW
+Reg = 2  # 0: whole map, 1: SW (h500 - All samples), 2: NW (h500 - Underestimates), 3: SE (h500 - Overestimates)
 
 # Create CONUS grid
-if adj4 == 1:
+if Reg == 1:
     xlat_slice = slice(33.9, 37.6)
     xlon_slice = slice(255.4, 260.6)
-
-elif adj4 == 2:
+elif Reg == 2:
     xlat_slice = slice(45.9, 49.6)
     xlon_slice = slice(237.4, 242.6)
-
 else:
     xlat_slice = slice(23.9, 49.6)
     xlon_slice = slice(235.4, 293.6)
-
-dfe = xr.open_dataset('/Users/jcahill4/DATA/h500/Obs/clima_gefs/clima_h500.nc')
-dfe = dfe['h500'].sel(lat=xlat_slice, lon=xlon_slice)
-
-CONUS_lats = dfe.lat.values[::4]
-CONUS_lons = dfe.lon.values[::4]
-CONUS_lons = CONUS_lons[:len(CONUS_lons) - 1]
-print(CONUS_lats)
-print(CONUS_lons)
-
-# Decrease input resolution?
-dec = 0  # 0 if normal, 1 if decreases
 
 # # # # # # # # # #  NEURAL NETWORK INPUTS # # # # # # # # # #
 
@@ -118,42 +107,42 @@ ds_obs = xr.open_mfdataset('/Users/jcahill4/DATA/{}/Obs/{}/clima_{}.nc'.format(
 variable, cdata, variable), concat_dim='time', combine='nested')
 ds_obs = ds_obs[variable].sel(lon=lon_slice, lat=lat_slice)
 
-# Specify Variables for plots
+# Specify lat and lon for input
 lats = ds_obs.lat.values  # lat is latitude name given by data
 lons = ds_obs.lon.values
 lons = lons + 180
-times = ds_obs.time.values
 
 # Turn obs into a pandas array
-ds_obs = list(zip(ds_obs.time.values, ds_obs.values))
-ds_obs = pd.DataFrame(ds_obs)
+ds_obs_l = list(zip(ds_obs.time.values, ds_obs.values))
+ds_obs = pd.DataFrame(ds_obs_l)
 ds_obs.columns = ['time', '{} obs'.format(variable)]
 
-# UFS
-# Read in each h500/OLR file (in a loop) so that each day 1 forecast gets made into its own array
-TimeBuild = []
-VarBuild = []  # start with empty lists
-for filepath in glob.iglob('/Users/jcahill4/DATA/{}/UFS/{}/*.nc'.format(variable, cdata)):
-    ds_UFS = xr.open_dataset(filepath)  # read in each UFS file
-    ds_UFS = ds_UFS[variable].sel(lon=lon_slice, lat=lat_slice)
-    ds_UFS = ds_UFS[0]
-    TimeBuild += [ds_UFS.time.values]
-    VarBuild += [ds_UFS.values]
-
-# Turn h500/OLR into a pandas array
-ds_UFS = list(zip(TimeBuild, VarBuild))
-ds_UFS = pd.DataFrame(ds_UFS)
-ds_UFS.columns = ['time', '{} UFS'.format(variable)]  # Name columns
-ds_UFS = ds_UFS.sort_values(by='time')
-
-# Merge data into a pandas array
-ds = pd.merge(ds_UFS, ds_obs)
-ds = ds.sort_values(by='time')
+# Get dates that match UFS dates (weekly forecasts)
+ds_obs = ds_obs[4:7295:7]  # 4: start at 1-5-00, 7295: end at 12-18-19, 7: weekly forecast
+ds_obs = ds_obs.reset_index(drop=True)
+ds = ds_obs.sort_values(by='time')
 timer = ds['time']
 
-# Create a pandas arrays that has index, dates, and obs maps
+# Pred data base
+ds_UFS1_base = xr.open_mfdataset('/Users/jcahill4/DATA/{}/UFS/{}/*.nc'.format(Pred, cdata), concat_dim='time',
+                                 combine='nested')
+ds_obs1_base = xr.open_dataset('/Users/jcahill4/DATA/{}/Obs/{}/clima_{}.nc'.format(Pred, cdata, Pred))
+ds_UFS_base = xr.open_mfdataset('/Users/jcahill4/DATA/{}/UFS/{}/*.nc'.format(Pred, cdata), concat_dim='time',
+                                combine='nested')
+
+
+CONUS = ds_obs1_base['h500'].sel(lat=xlat_slice, lon=xlon_slice)
+CONUS_lats = CONUS.lat.values[::4]
+CONUS_lons = CONUS.lon.values[::4]
+CONUS_lons = CONUS_lons[:len(CONUS_lons) - 1]
+print(CONUS_lats)
+print(CONUS_lons)
+
+# # # # # # # # # #  MJO + ENSO COMPARISON SET-UP # # # # # # # # # #
+
+# Create a pandas arrays that has index, dates, and obs maps of validation data
 val_idx = np.arange(0, smlnum)
-obs_maps = ds['olr obs'][bignum:]
+obs_maps = ds['{} obs'.format(variable)][bignum:]
 date_list = ds['time'][bignum:]
 idx_date = pd.DataFrame({'idx': val_idx, 'dates': date_list, 'obs': obs_maps})
 
@@ -184,12 +173,9 @@ mdata_ymd = mdata_ymd.drop(['year', 'month', 'day'], axis=1)
 # Merge with time data
 idx_all = pd.merge(idx_date, mdata_ymd, on='dates')
 
-# Pred data base
-ds_UFS1_base = xr.open_mfdataset('/Users/jcahill4/DATA/{}/UFS/{}/*.nc'.format(Pred, cdata), concat_dim='time',
-                                 combine='nested')
-ds_obs1_base = xr.open_dataset('/Users/jcahill4/DATA/{}/Obs/{}/clima_{}.nc'.format(Pred, cdata, Pred))
-ds_UFS_base = xr.open_mfdataset('/Users/jcahill4/DATA/{}/UFS/{}/*.nc'.format(Pred, cdata), concat_dim='time',
-                                combine='nested')
+# # # # # # # # # #  ACCURACY MAP SET-UP # # # # # # # # # #
+
+Acc_Map_Data = np.empty((23, len(CONUS_lons), len(CONUS_lats)))
 
 # SET UP MAP
 xmap_full = np.empty((len(CONUS_lons), len(CONUS_lats)))
@@ -240,7 +226,7 @@ xmap_spr_ovr = np.empty((len(CONUS_lons), len(CONUS_lats)))
 xmap_spr_ovr[:] = np.nan
 
 # location array
-if adj4 != 0:
+if Reg != 0:
     loc_arr = []
     loc_arrCN = []
     loc_arrCLS = []
@@ -320,7 +306,7 @@ for c1, xxx in enumerate(CONUS_lons):
             acc_spr_ovr = []
 
             # arrays for 4 adjacent grid points
-            if adj4 != 0:
+            if Reg != 0:
                 locos = []
                 locosCN = []
                 locosCLS = []
@@ -346,7 +332,7 @@ for c1, xxx in enumerate(CONUS_lons):
                 # Read in data
                 ds_UFS = ds_UFS_base['{}'.format(Pred)].sel(lat=lat_sliceP, lon=lon_sliceP)
 
-                ### DATA BEING READ IN AND MERGED CORRECTLY HAS BEEN TRIPLE CHECKED
+                # # # DATA BEING READ IN AND MERGED CORRECTLY HAS BEEN TRIPLE CHECKED
 
                 if error == 0:
 
@@ -371,8 +357,8 @@ for c1, xxx in enumerate(CONUS_lons):
                         z = z + 1
 
                     # Convert Obs to pandas
-                    ds_obsp = list(zip(ds_obs1.time.values, ds_obs1.values.flatten()))
-                    ds_obsp = pd.DataFrame(ds_obsp)
+                    ds_obsp_l = list(zip(ds_obs1.time.values, ds_obs1.values.flatten()))
+                    ds_obsp = pd.DataFrame(ds_obsp_l)
                     ds_obsp.columns = ['time', '{} Obs'.format(Pred)]
 
                     # Remove time (non-date) aspect
@@ -381,7 +367,7 @@ for c1, xxx in enumerate(CONUS_lons):
 
                     # Merge UFS and obs
                     ds10x = pd.merge(ds_obsp, ds_UFS10, on='time')
-                    ### DATA BEING READ IN AND MERGED CORRECTLY HAS BEEN TRIPLE CHECKED
+                    # # # DATA BEING READ IN AND MERGED CORRECTLY HAS BEEN TRIPLE CHECKED
 
                     # PART 2: AVERAGE EACH FILE BETWEEN LEAD_TIMES 10-14, SO WE HAVE TWO VECTORS (OBS AND UFS)
                     # Mean over LT10-14
@@ -389,8 +375,7 @@ for c1, xxx in enumerate(CONUS_lons):
                     ds10x = ds10x.sort_values(by='time')
                     ds10x = ds10x.drop(['time'], axis=1)
                     ds10 = ds10x.groupby(np.arange(len(ds10x)) // divisor).mean()
-
-                    ### DATA BEING AVERAGED HAS BEEN TRIPLE CHECKED
+                    # # # DATA BEING AVERAGED HAS BEEN TRIPLE CHECKED
 
                     # PART 3: CREATE TWO MORE COLUMNS/VECTORS FOR ERRORS AND CLASSES
 
@@ -485,7 +470,7 @@ for c1, xxx in enumerate(CONUS_lons):
 
                 # DATA RETRIEVAL
 
-                # Run a loop so all the h500/OLR obs maps are available 
+                # Run a loop so all the inout variable obs maps are available
                 # (this is before the code is split into Training and Validation)
                 x = 0
                 ALLx = []
@@ -981,7 +966,7 @@ for c1, xxx in enumerate(CONUS_lons):
             xmap_wint_ovr[c1][c2] = np.nanmean(acc_wint_ovr)
             xmap_spr_ovr[c1][c2] = np.nanmean(acc_spr_ovr)
 
-            if adj4 != 0:
+            if Reg != 0:
                 loc_arr += [locos]
                 loc_arrCN += [locosCN]
                 loc_arrCLS += [locosCLS]
