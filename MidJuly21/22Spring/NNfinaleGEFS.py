@@ -41,8 +41,8 @@ cmap = plt.get_cmap('cmr.redshift')  # MPL
 # %% -------------------------------- INPUTS --------------------------------
 
 # Define a set of random seeds (or just one seed if you want to check)
-# r = np.arange(88, 89, 1)
 r = [92, 95, 100, 137, 141, 142]
+# r = np.arange(88, 89, 1)
 
 # Define Input Map variable
 variable = 'olr'
@@ -55,102 +55,67 @@ elif variable == 'u200':
     lon_slice = slice(120, 300)
     Map = 2
 
-# New data (gefs) or old data?
-gef = True
-if gef == True:
-    cdata = 'clima_gefs'
-    uvdata = 'raw_gefs'
-    gefs = 1  # used for savefig name (g1/g0)
-    bignum = 862  # selects testing / training data
-    smlnum = 180  # " "
-    p20 = 147  # used to select top 20% of samples
-    LT_tot = 35
-else:
-    cdata = 'clima'
-    uvdata = 'raw'
-    gefs = 0
-    bignum = 512
-    smlnum = 108
-    p20 = 87
-    LT_tot = 30
-
-# Layer
-layer = 1
-
-# Error
-error = 0  # 0 if error, 1 if no error
-
-# Only grabbing 4 spots?
-adj4 = 1  # 0 is no, 1 is for SW, 2, is for NW
-
-# Create CONUS grid
-if gefs == True:
-    if adj4 == 1:
-        xlat_slice = slice(33.9, 37.6)
-        xlon_slice = slice(255.4, 260.6)
-
-    elif adj4 == 2:
-        xlat_slice = slice(45.9, 49.6)
-        xlon_slice = slice(237.4, 242.6)
-
-    else:
-        xlat_slice = slice(23.9, 49.6)
-        xlon_slice = slice(235.4, 293.6)
-
-    dfe = xr.open_dataset('/Users/jcahill4/DATA/h500/Obs/clima_gefs/clima_h500.nc')
-    dfe = dfe['h500'].sel(lat=xlat_slice, lon=xlon_slice)
-
-    CONUS_lats = dfe.lat.values[::4]
-    CONUS_lons = dfe.lon.values[::4]
-    CONUS_lons = CONUS_lons[:len(CONUS_lons) - 1]
-print(CONUS_lats)
-print(CONUS_lons)
-
-# LeadTime
-lead_time1 = 10  # will be averaged from LT1-LT2
-lead_time2 = 14
-
-# Epochs
-epochs = 10_000
-
-# Nodes
-nodes = 20
-
-# Batch Size (Not Identified in plot name scheme)
-batch_size = 32
-
-# Learning Rate
-LR = 0.01
-str(LR).split('.')[1]
-
-# TrainValLocation
-TTLoco = 0  # 0 if TrainVal, 1 if ValTrain
-
-# Classes
-Classes = 3
-
-# Predictor
+# Define
 Pred = 'h500'
 if Pred == 'prcp':
     Predictor = 0
 elif Pred == 'h500':
     Predictor = 1
 
-# Patience
-PATIENCE = 20
+# Helps sort data
+cdata = 'clima_gefs'
+bignum = 862  # selects testing / training data
+smlnum = 180  # " "
+LT_tot = 35  # how many total lead times are there?
 
-# Min loss or Max Acc
-MinMax = 0  # 0 if min loss and 1 if max acc
+# Whole map or just a subset?
+adj4 = 2  # 0 is no, 1 is for SW, 2, is for NW
 
-# Decrease input resolution
+# Create CONUS grid
+if adj4 == 1:
+    xlat_slice = slice(33.9, 37.6)
+    xlon_slice = slice(255.4, 260.6)
+
+elif adj4 == 2:
+    xlat_slice = slice(45.9, 49.6)
+    xlon_slice = slice(237.4, 242.6)
+
+else:
+    xlat_slice = slice(23.9, 49.6)
+    xlon_slice = slice(235.4, 293.6)
+
+dfe = xr.open_dataset('/Users/jcahill4/DATA/h500/Obs/clima_gefs/clima_h500.nc')
+dfe = dfe['h500'].sel(lat=xlat_slice, lon=xlon_slice)
+
+CONUS_lats = dfe.lat.values[::4]
+CONUS_lons = dfe.lon.values[::4]
+CONUS_lons = CONUS_lons[:len(CONUS_lons) - 1]
+print(CONUS_lats)
+print(CONUS_lons)
+
+# Decrease input resolution?
 dec = 0  # 0 if normal, 1 if decreases
 
-# -------------------------------- READ IN DATA ---------------------------------
+# # # # # # # # # #  NEURAL NETWORK INPUTS # # # # # # # # # #
+
+error = 0  # Are we prediting UFS errors? (0 if error, 1 if no error)
+lead_time1 = 10  # will be averaged from LT1-LT2
+lead_time2 = 14
+epochs = 10_000
+nodes = 20
+batch_size = 32  # Not identified in plot naming scheme
+LR = 0.01  # Learning Rate
+Classes = 3  # 3 classes (-1: Under_est, 0: Acc_est, 1: Over_est)
+PATIENCE = 20
+MinMax = 0  # 0 if minimizing loss and 1 if maximizing accuracy
+TTLoco = 0  # Order of Training and Validation datasets (0 if TrainVal, 1 if ValTrain)
+
+# # # # # # # # # #  READ IN DATA # # # # # # # # # #
 
 # OBS
 # Read in ALL obs using xarray and paramters
 ds_obs = xr.open_mfdataset('/Users/jcahill4/DATA/{}/Obs/{}/clima_{}.nc'.format(
-    variable, cdata, variable), concat_dim='time', combine='nested')
+variable, cdata, variable), concat_dim='time', combine='nested')
 ds_obs = ds_obs[variable].sel(lon=lon_slice, lat=lat_slice)
 
 # Specify Variables for plots
@@ -556,7 +521,7 @@ for c1, xxx in enumerate(CONUS_lons):
                 # x_train are the input maps w/ shape (bignum, 50, 241) : (# cases, lats, lons)
                 # y_train are the predicted error classes of the area of interest shape (bignum)
 
-                # Change x_train and x_val shape
+                # Change x_train and x_val shape if we wanted to decrease input map resolution
                 if dec == 1:
                     x_train = x_train[:, ::4, ::4]
                     x_val = x_val[:, ::4, ::4]
