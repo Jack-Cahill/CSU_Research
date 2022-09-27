@@ -9,7 +9,6 @@ import tensorflow as tf
 import sys
 import numpy as np
 import xarray as xr
-import glob
 import pandas as pd
 import time
 import matplotlib.pyplot as plt
@@ -19,7 +18,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import warnings
 import matplotlib.colors as colors
-from Functions import defineNN, PredictionAccuracy, CategoricalTruePositives
+from Functions import make_model
 
 sys.path.append('')  # add path to network, metrics and plot
 warnings.filterwarnings('ignore', "GeoSeries.isna", UserWarning)
@@ -72,7 +71,7 @@ LT_tot = 35  # how many total lead times are there?
 dec = 0  # 0 if normal, 1 if decrease
 
 # Whole map or just a subset?
-Reg = 2  # 0: whole map, 1: SW (h500 - All samples), 2: NW (h500 - Underestimates), 3: SE (h500 - Overestimates)
+Reg = 2  # 0: whole map, 1: 4 of SW (h500 - All samples), 2: NW (h500 - Underestimates), 3: SE (h500 - Overestimates)
 
 # Create CONUS grid
 if Reg == 1:
@@ -98,6 +97,8 @@ Classes = 3  # 3 classes (-1: Under_est, 0: Acc_est, 1: Over_est)
 PATIENCE = 20
 MinMax = 0  # 0 if minimizing loss and 1 if maximizing accuracy
 TTLoco = 0  # Order of Training and Validation datasets (0 if TrainVal, 1 if ValTrain)
+RIDGE1 = 0.0  # Regularization Techniques
+DROPOUT = 0.3
 
 # # # # # # # # # #  READ IN DATA # # # # # # # # # #
 
@@ -175,9 +176,12 @@ idx_all = pd.merge(idx_date, mdata_ymd, on='dates')
 
 # # # # # # # # # #  ACCURACY MAP SET-UP # # # # # # # # # #
 
-Acc_Map_Data = np.empty((23, len(CONUS_lons), len(CONUS_lats)))
+# 23 is for the 23 maps I'll make
+# 1 all samples, 3 classes (predicted class), 3 classes (actual class), 4 all samples each season, 3*4 (class*season)
+acc_map_tot = 23
+Acc_Map_Data = np.empty((acc_map_tot, len(CONUS_lons), len(CONUS_lats)))
 
-# SET UP MAP
+'''# SET UP MAP
 xmap_full = np.empty((len(CONUS_lons), len(CONUS_lats)))
 xmap_full[:] = np.nan
 xmap_und = np.empty((len(CONUS_lons), len(CONUS_lats)))
@@ -223,87 +227,101 @@ xmap_fall_ovr[:] = np.nan
 xmap_wint_ovr = np.empty((len(CONUS_lons), len(CONUS_lats)))
 xmap_wint_ovr[:] = np.nan
 xmap_spr_ovr = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_spr_ovr[:] = np.nan
+xmap_spr_ovr[:] = np.nan'''
 
-# location array
+
+# # # # # # # # # #  REGIONS # # # # # # # # # #
+
+# If we're not running a full map, save data for the region / group of 4 grid points
 if Reg != 0:
-    loc_arr = []
-    loc_arrCN = []
-    loc_arrCLS = []
+    loc_arr = []  # idx
+    loc_arrCN = []  # Correct or No
+    loc_arrCLS = []  # Class
 
-    # set-up a counter so we can determine how many grid points we're running
+    # Set up a counter, so we can determine how many grid points we're running for
     counter = 0
 
-### SHAPEFILES
+# Convert lat and lons into grid pts
+ptlats = []
+for i in range(len(CONUS_lons)):  # repeat list of lats multiple times
+    for element in CONUS_lats:
+        ptlats += [element]
+ptlats = np.array(ptlats)
+
+ptlons = []
+for i in range(len(CONUS_lons)):  # repeat first lon multiple times, then second lon, etc
+    for j in range(len(CONUS_lats)):
+        ptlons += [CONUS_lons[i]]
+ptlons = np.array(ptlons)
+
+# Make sure lons match shapefile lons
+ptlons = ptlons - 360
 
 # Read in shapefiles & set coords
 states = gp.read_file('/Users/jcahill4/DATA/Udders/usa-states-census-2014.shp')
 states.crs = 'EPSG:4326'
 
+# Set regions
 NW = states[states['STUSPS'].isin(['WA', 'OR', 'ID'])]
+SE = states[states['STUSPS'].isin(['FL', 'GA', 'AL', 'SC', 'NC', 'VA'])]
+
+# put lat and lons into array as gridpoints using geopandas
+SF_grid = pd.DataFrame({'longitude': ptlons, 'latitude': ptlats})
+gdf = gp.GeoDataFrame(SF_grid, geometry=gp.points_from_xy(SF_grid.longitude, SF_grid.latitude))
+
+
+# Plot region
+if Reg == 2:
+    region = NW
+elif Reg == 3:
+    region = SE
+else:
+    region = states
+US_pts = gp.sjoin(gdf, region, op='within')
 us_boundary_map = states.boundary.plot(color="white", linewidth=1)
-
-### Convert lat and lons into grid pts
-
-# repeat list of lats multiple times
-ptlats = []
-for i in range(len(CONUS_lons)):
-    for element in CONUS_lats:
-        ptlats += [element]
-ptlats = np.array(ptlats)
-
-# repeat first lon multiple times, then second lon, etc
-ptlons = []
-for i in range(len(CONUS_lons)):
-    for j in range(len(CONUS_lats)):
-        ptlons += [CONUS_lons[i]]
-ptlons = np.array(ptlons)
-
-# convert lons into lons that match polygons
-ptlons = ptlons - 360
-
-# put lat and lons into array as gridpoints        
-df1 = pd.DataFrame({'longitude': ptlons, 'latitude': ptlats})
-gdf = gp.GeoDataFrame(df1, geometry=gp.points_from_xy(df1.longitude, df1.latitude))
-US_pts = gp.sjoin(gdf, states, op='within')
 US_pts.plot(ax=us_boundary_map, color='pink')
 plt.show()
 
+# put lat and lons into pandas df
+reg_lon_lat = pd.DataFrame({'longitude': US_pts.longitude, 'latitude': US_pts.latitude})
+
 # LOOP THROUGH MAP
-# After merging lets put this in a pd df
-dfC = pd.DataFrame({'longitude': US_pts.longitude, 'latitude': US_pts.latitude})
 for c1, xxx in enumerate(CONUS_lons):
     for c2, xx in enumerate(CONUS_lats):
 
-        df_oop = dfC.loc[dfC.latitude == xx]
-        if (xxx - 360) in df_oop.longitude.unique():
+        # Check if the lats and lons fall within specified region - if so, run NN
+        df_chk = reg_lon_lat.loc[reg_lon_lat.latitude == xx]
+        if (xxx - 360) in df_chk.longitude.unique():
+
+            # count many grid points we're running for and print grid poiny
             counter = counter + 1
             print(xx, xxx)
 
-            # arrays that restart for every location
-            acc_full = []
-            acc_und = []
-            acc_acc = []
-            acc_ovr = []
-            acc_und_a = []
-            acc_acc_a = []
-            acc_ovr_a = []
-            acc_sum_full = []
-            acc_fall_full = []
-            acc_wint_full = []
-            acc_spr_full = []
-            acc_sum_und = []
-            acc_fall_und = []
-            acc_wint_und = []
-            acc_spr_und = []
-            acc_sum_acc = []
-            acc_fall_acc = []
-            acc_wint_acc = []
-            acc_spr_acc = []
-            acc_sum_ovr = []
-            acc_fall_ovr = []
-            acc_wint_ovr = []
-            acc_spr_ovr = []
+            # lists that restart for every location
+            '''acc_full = []0
+            acc_und = []1
+            acc_acc = []2
+            acc_ovr = []3
+            acc_und_a = []4
+            acc_acc_a = []5
+            acc_ovr_a = []6
+            acc_sum_full = []7
+            acc_fall_full = []8
+            acc_wint_full = []9
+            acc_spr_full = []10
+            acc_sum_und = []11
+            acc_fall_und = []12
+            acc_wint_und = []13
+            acc_spr_und = []14
+            acc_sum_acc = []15
+            acc_fall_acc = []16
+            acc_wint_acc = []17
+            acc_spr_acc = []18
+            acc_sum_ovr = []19
+            acc_fall_ovr = []20
+            acc_wint_ovr = []21
+            acc_spr_ovr = []22'''
+            acc_lists = [[] for _ in range(acc_map_tot)]
 
             # arrays for 4 adjacent grid points
             if Reg != 0:
@@ -311,8 +329,8 @@ for c1, xxx in enumerate(CONUS_lons):
                 locosCN = []
                 locosCLS = []
 
+            # START HERE
             for x in r:
-
                 # Select map point
                 lat_sliceP = slice(xx - .01, xx + .01)
                 lon_sliceP = slice(xxx - .01, xxx + .01)
@@ -516,51 +534,6 @@ for c1, xxx in enumerate(CONUS_lons):
                     x_train_shp = x_train.reshape(bignum, len(lats) * len(lons))
                     x_val_shp = x_val.reshape(smlnum, len(lats) * len(lons))
 
-                # -------------------------------- SPECIAL PARAMETERS --------------------------------
-
-                RIDGE1 = 0.0
-                DROPOUT = 0.3
-
-
-                # -------------------------------- NETWORK SETUP --------------------------------
-
-                # MAKE THE NN ARCHITECTURE
-                def make_model():
-                    # Define and train the model
-                    tf.keras.backend.clear_session()
-
-                    # NORMAL ANN
-                    model = defineNN([nodes],
-                                     input1_shape=np.shape(x_train_shp)[1],
-                                     output_shape=3,
-                                     ridge_penalty1=RIDGE1,
-                                     dropout=DROPOUT,
-                                     act_fun='relu',
-                                     network_seed=NP_SEED)
-
-                    # tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
-                    # tf.keras.losses.CategoricalCrossentropy()
-                    loss_function = tf.keras.losses.CategoricalCrossentropy()
-
-                    model.compile(
-                        # optimizer = tf.keras.optimizers.SGD(
-                        # learning_rate=LR, momentum=0.9, nesterov=True),
-                        optimizer=tf.keras.optimizers.Adam(learning_rate=LR),
-                        loss=loss_function,
-                        metrics=[
-                            # tf.keras.metrics.SparseCategoricalAccuracy(
-                            # name="sparse_categorical_accuracy", dtype=None),
-                            tf.keras.metrics.CategoricalAccuracy(
-                                name="categorical_accuracy", dtype=None),
-                            PredictionAccuracy(y_train.shape[0]),
-                            CategoricalTruePositives()
-                        ]
-                    )
-
-                    # model.summary()
-                    return model, loss_function
-
-
                 # -------------------------------- MAKE NN --------------------------------
 
                 if MinMax == 0:
@@ -716,31 +689,31 @@ for c1, xxx in enumerate(CONUS_lons):
 
                     # ACC MAP: get accuracy of top 20% most confident samples and put them in a list
                     CorrCount = np.count_nonzero(CorrOrNo20 == 1)
-                    acc_full += [CorrCount / len(CorrOrNo20)]
+                    acc_lists[0] += [CorrCount / len(CorrOrNo20)]
 
                     CorrCount0_pd = CorrCount_pd[CorrCount_pd["WinClass"] == 0]
                     CorrCount0_list = CorrCount0_pd.iloc[:, 0]
                     CorrCount0 = np.count_nonzero(CorrCount0_list == 1)
                     if len(CorrCount0_list) == 0:
-                        acc_und += [np.nan]
+                        acc_lists[1] += [np.nan]
                     else:
-                        acc_und += [CorrCount0 / len(CorrCount0_list)]
+                        acc_lists[1] += [CorrCount0 / len(CorrCount0_list)]
 
                     CorrCount1_pd = CorrCount_pd[CorrCount_pd["WinClass"] == 1]
                     CorrCount1_list = CorrCount1_pd.iloc[:, 0]
                     CorrCount1 = np.count_nonzero(CorrCount1_list == 1)
                     if len(CorrCount1_list) == 0:
-                        acc_acc += [np.nan]
+                        acc_lists[2] += [np.nan]
                     else:
-                        acc_acc += [CorrCount1 / len(CorrCount1_list)]
+                        acc_lists[2] += [CorrCount1 / len(CorrCount1_list)]
 
                     CorrCount2_pd = CorrCount_pd[CorrCount_pd["WinClass"] == 2]
                     CorrCount2_list = CorrCount2_pd.iloc[:, 0]
                     CorrCount2 = np.count_nonzero(CorrCount2_list == 1)
                     if len(CorrCount2_list) == 0:
-                        acc_ovr += [np.nan]
+                        acc_lists[3] += [np.nan]
                     else:
-                        acc_ovr += [CorrCount2 / len(CorrCount2_list)]
+                        acc_lists[3] += [CorrCount2 / len(CorrCount2_list)]
 
                     # Seasonal groups
                     s_pd = pd.merge(sum_pd, CorrCount_pd, on='Index')
@@ -767,149 +740,149 @@ for c1, xxx in enumerate(CONUS_lons):
                     if 1 in s_pd['Corr?'].values:
                         CorrCountSum = s_pd['Corr?'].value_counts()[1]
                         if len(s_pd['Index']) == 0:
-                            acc_sum_full += [np.nan]
+                            acc_lists[7] += [np.nan]
                         else:
-                            acc_sum_full += [CorrCountSum / len(s_pd['Index'])]
+                            acc_lists[7] += [CorrCountSum / len(s_pd['Index'])]
                     else:
-                        acc_sum_full += [np.nan]
+                        acc_lists[7] += [np.nan]
 
                     if 1 in s_u_pd['Corr?'].values:
                         CorrCountSumu = s_u_pd['Corr?'].value_counts()[1]
                         if len(s_u_pd['Index']) == 0:
-                            acc_sum_und += [np.nan]
+                            acc_lists[11] += [np.nan]
                         else:
-                            acc_sum_und += [CorrCountSumu / len(s_u_pd['Index'])]
+                            acc_lists[11] += [CorrCountSumu / len(s_u_pd['Index'])]
                     else:
-                        acc_sum_und += [np.nan]
+                        acc_lists[11] += [np.nan]
 
                     if 1 in s_a_pd['Corr?'].values:
                         CorrCountSuma = s_a_pd['Corr?'].value_counts()[1]
                         if len(s_a_pd['Index']) == 0:
-                            acc_sum_acc += [np.nan]
+                            acc_lists[15] += [np.nan]
                         else:
-                            acc_sum_acc += [CorrCountSuma / len(s_a_pd['Index'])]
+                            acc_lists[15] += [CorrCountSuma / len(s_a_pd['Index'])]
                     else:
-                        acc_sum_acc += [np.nan]
+                        acc_lists[15] += [np.nan]
 
                     if 1 in s_o_pd['Corr?'].values:
                         CorrCountSumo = s_o_pd['Corr?'].value_counts()[1]
                         if len(s_o_pd['Index']) == 0:
-                            acc_sum_ovr += [np.nan]
+                            acc_lists[19] += [np.nan]
                         else:
-                            acc_sum_ovr += [CorrCountSumo / len(s_o_pd['Index'])]
+                            acc_lists[19] += [CorrCountSumo / len(s_o_pd['Index'])]
                     else:
-                        acc_sum_ovr += [np.nan]
+                        acc_lists[19] += [np.nan]
 
                     # fall
                     if 1 in f_pd['Corr?'].values:
                         CorrCountFall = f_pd['Corr?'].value_counts()[1]
                         if len(f_pd['Index']) == 0:
-                            acc_fall_full += [np.nan]
+                            acc_lists[8] += [np.nan]
                         else:
-                            acc_fall_full += [CorrCountFall / len(f_pd['Index'])]
+                            acc_lists[8] += [CorrCountFall / len(f_pd['Index'])]
                     else:
-                        acc_fall_full += [np.nan]
+                        acc_lists[8] += [np.nan]
 
                     if 1 in f_u_pd['Corr?'].values:
                         CorrCountFallu = f_u_pd['Corr?'].value_counts()[1]
                         if len(f_u_pd['Index']) == 0:
-                            acc_fall_und += [np.nan]
+                            acc_lists[12] += [np.nan]
                         else:
-                            acc_fall_und += [CorrCountFallu / len(f_u_pd['Index'])]
+                            acc_lists[12] += [CorrCountFallu / len(f_u_pd['Index'])]
                     else:
-                        acc_fall_und += [np.nan]
+                        acc_lists[12] += [np.nan]
 
                     if 1 in f_a_pd['Corr?'].values:
                         CorrCountFalla = f_a_pd['Corr?'].value_counts()[1]
                         if len(f_a_pd['Index']) == 0:
-                            acc_fall_acc += [np.nan]
+                            acc_lists[16] += [np.nan]
                         else:
-                            acc_fall_acc += [CorrCountFalla / len(f_a_pd['Index'])]
+                            acc_lists[16] += [CorrCountFalla / len(f_a_pd['Index'])]
                     else:
-                        acc_fall_acc += [np.nan]
+                        acc_lists[16] += [np.nan]
 
                     if 1 in f_o_pd['Corr?'].values:
                         CorrCountFallo = f_o_pd['Corr?'].value_counts()[1]
                         if len(f_o_pd['Index']) == 0:
-                            acc_fall_ovr += [np.nan]
+                            acc_lists[20] += [np.nan]
                         else:
-                            acc_fall_ovr += [CorrCountFallo / len(f_o_pd['Index'])]
+                            acc_lists[20] += [CorrCountFallo / len(f_o_pd['Index'])]
                     else:
-                        acc_fall_ovr += [np.nan]
+                        acc_lists[20] += [np.nan]
 
                     # winter
                     if 1 in w_pd['Corr?'].values:
                         CorrCountWint = w_pd['Corr?'].value_counts()[1]
                         if len(w_pd['Index']) == 0:
-                            acc_wint_full += [np.nan]
+                            acc_lists[9] += [np.nan]
                         else:
-                            acc_wint_full += [CorrCountWint / len(w_pd['Index'])]
+                            acc_lists[9] += [CorrCountWint / len(w_pd['Index'])]
                     else:
-                        acc_wint_full += [np.nan]
+                        acc_lists[9] += [np.nan]
 
                     if 1 in w_u_pd['Corr?'].values:
                         CorrCountWintu = w_u_pd['Corr?'].value_counts()[1]
                         if len(w_u_pd['Index']) == 0:
-                            acc_wint_und += [np.nan]
+                            acc_lists[13] += [np.nan]
                         else:
-                            acc_wint_und += [CorrCountWintu / len(w_u_pd['Index'])]
+                            acc_lists[13] += [CorrCountWintu / len(w_u_pd['Index'])]
                     else:
-                        acc_wint_und += [np.nan]
+                        acc_lists[13] += [np.nan]
 
                     if 1 in w_a_pd['Corr?'].values:
                         CorrCountWinta = w_a_pd['Corr?'].value_counts()[1]
                         if len(w_a_pd['Index']) == 0:
-                            acc_wint_acc += [np.nan]
+                            acc_lists[17] += [np.nan]
                         else:
-                            acc_wint_acc += [CorrCountWinta / len(w_a_pd['Index'])]
+                            acc_lists[17] += [CorrCountWinta / len(w_a_pd['Index'])]
                     else:
-                        acc_wint_acc += [np.nan]
+                        acc_lists[17] += [np.nan]
 
                     if 1 in w_o_pd['Corr?'].values:
                         CorrCountWinto = w_o_pd['Corr?'].value_counts()[1]
                         if len(w_o_pd['Index']) == 0:
-                            acc_wint_ovr += [np.nan]
+                            acc_lists[21] += [np.nan]
                         else:
-                            acc_wint_ovr += [CorrCountWinto / len(w_o_pd['Index'])]
+                            acc_lists[21] += [CorrCountWinto / len(w_o_pd['Index'])]
                     else:
-                        acc_wint_ovr += [np.nan]
+                        acc_lists[21] += [np.nan]
 
                     # spring
                     if 1 in sp_pd['Corr?'].values:
                         CorrCountSpr = sp_pd['Corr?'].value_counts()[1]
                         if len(sp_pd['Index']) == 0:
-                            acc_spr_full += [np.nan]
+                            acc_lists[10] += [np.nan]
                         else:
-                            acc_spr_full += [CorrCountSpr / len(sp_pd['Index'])]
+                            acc_lists[10] += [CorrCountSpr / len(sp_pd['Index'])]
                     else:
-                        acc_spr_full += [np.nan]
+                        acc_lists[10] += [np.nan]
 
                     if 1 in sp_u_pd['Corr?'].values:
                         CorrCountSpru = sp_u_pd['Corr?'].value_counts()[1]
                         if len(sp_u_pd['Index']) == 0:
-                            acc_spr_und += [np.nan]
+                            acc_lists[14] += [np.nan]
                         else:
-                            acc_spr_und += [CorrCountSpru / len(sp_u_pd['Index'])]
+                            acc_lists[14] += [CorrCountSpru / len(sp_u_pd['Index'])]
                     else:
-                        acc_spr_und += [np.nan]
+                        acc_lists[14] += [np.nan]
 
                     if 1 in sp_a_pd['Corr?'].values:
                         CorrCountSpra = sp_a_pd['Corr?'].value_counts()[1]
                         if len(sp_a_pd['Index']) == 0:
-                            acc_spr_acc += [np.nan]
+                            acc_lists[18] += [np.nan]
                         else:
-                            acc_spr_acc += [CorrCountSpra / len(sp_a_pd['Index'])]
+                            acc_lists[18] += [CorrCountSpra / len(sp_a_pd['Index'])]
                     else:
-                        acc_spr_acc += [np.nan]
+                        acc_lists[18] += [np.nan]
 
                     if 1 in sp_o_pd['Corr?'].values:
                         CorrCountSpro = sp_o_pd['Corr?'].value_counts()[1]
                         if len(sp_o_pd['Index']) == 0:
-                            acc_spr_ovr += [np.nan]
+                            acc_lists[22] += [np.nan]
                         else:
-                            acc_spr_ovr += [CorrCountSpro / len(sp_o_pd['Index'])]
+                            acc_lists[22] += [CorrCountSpro / len(sp_o_pd['Index'])]
                     else:
-                        acc_spr_ovr += [np.nan]
+                        acc_lists[22] += [np.nan]
 
                     # Repeat process, but instead of Predicted Class (WinClass), grab True Class 
                     CorrCount_pd_a = pd.DataFrame({'Corr?': CorrOrNo20, 'ActClass': ActClass20})
@@ -918,31 +891,30 @@ for c1, xxx in enumerate(CONUS_lons):
                     CorrCount0_list_a = CorrCount0_pd_a.iloc[:, 0]
                     CorrCount0_a = np.count_nonzero(CorrCount0_list_a == 1)
                     if len(CorrCount0_list_a) == 0:
-                        acc_und_a += [np.nan]
+                        acc_lists[4] += [np.nan]
                     else:
-                        acc_und_a += [CorrCount0_a / len(CorrCount0_list_a)]
+                        acc_lists[4] += [CorrCount0_a / len(CorrCount0_list_a)]
 
                     CorrCount1_pd_a = CorrCount_pd_a[CorrCount_pd_a["ActClass"] == 1]
                     CorrCount1_list_a = CorrCount1_pd_a.iloc[:, 0]
                     CorrCount1_a = np.count_nonzero(CorrCount1_list_a == 1)
                     if len(CorrCount1_list_a) == 0:
-                        acc_acc_a += [np.nan]
+                        acc_lists[5] += [np.nan]
                     else:
-                        acc_acc_a += [CorrCount1_a / len(CorrCount1_list_a)]
+                        acc_lists[5] += [CorrCount1_a / len(CorrCount1_list_a)]
 
                     CorrCount2_pd_a = CorrCount_pd_a[CorrCount_pd_a["ActClass"] == 2]
                     CorrCount2_list_a = CorrCount2_pd_a.iloc[:, 0]
                     CorrCount2_a = np.count_nonzero(CorrCount2_list_a == 1)
                     if len(CorrCount2_list_a) == 0:
-                        acc_ovr_a += [np.nan]
+                        acc_lists[6] += [np.nan]
                     else:
-                        acc_ovr_a += [CorrCount2_a / len(CorrCount2_list_a)]
-
+                        acc_lists[6] += [CorrCount2_a / len(CorrCount2_list_a)]
 
                 else:
                     Trash = Trash + 1
 
-            xmap_full[c1][c2] = np.nanmean(acc_full)
+            '''xmap_full[c1][c2] = np.nanmean(acc_full)
             xmap_acc[c1][c2] = np.nanmean(acc_acc)
             xmap_und[c1][c2] = np.nanmean(acc_und)
             xmap_ovr[c1][c2] = np.nanmean(acc_ovr)
@@ -964,7 +936,9 @@ for c1, xxx in enumerate(CONUS_lons):
             xmap_sum_ovr[c1][c2] = np.nanmean(acc_sum_ovr)
             xmap_fall_ovr[c1][c2] = np.nanmean(acc_fall_ovr)
             xmap_wint_ovr[c1][c2] = np.nanmean(acc_wint_ovr)
-            xmap_spr_ovr[c1][c2] = np.nanmean(acc_spr_ovr)
+            xmap_spr_ovr[c1][c2] = np.nanmean(acc_spr_ovr)'''
+            for abc in range(acc_map_tot):
+                Acc_Map_Data[abc][c1][c2] = np.nanmean(acc_lists[abc])
 
             if Reg != 0:
                 loc_arr += [locos]
@@ -975,7 +949,7 @@ print('DONE')
 '''print(np.amax(xmap_full))
 print(np.amin(xmap_full))
 print(np.average(xmap_full))'''
-print(xmap_full)
+print(Acc_Map_Data[0])
 
 
 # %%
@@ -1312,7 +1286,7 @@ ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
 ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
 
 # plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_full.T, vmin=vmin, vmax=vmax, norm=vmid,
+cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[0].T, vmin=vmin, vmax=vmax, norm=vmid,
                cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
 
@@ -1346,7 +1320,7 @@ ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
 ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
 
 # plo
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_und.T, vmin=vmin, vmax=vmax, norm=vmid,
+cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[1].T, vmin=vmin, vmax=vmax, norm=vmid,
                cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
 
