@@ -138,7 +138,7 @@ CONUS_lons = CONUS_lons[:len(CONUS_lons) - 1]
 print(CONUS_lats)
 print(CONUS_lons)
 
-# # # # # # # # # #  MJO + ENSO COMPARISON SET-UP # # # # # # # # # #
+'''# # # # # # # # # #  MJO + ENSO COMPARISON SET-UP # # # # # # # # # #
 
 # Create a pandas arrays that has index, dates, and obs maps of validation data
 val_idx = np.arange(0, smlnum)
@@ -239,7 +239,7 @@ US_pts.plot(ax=us_boundary_map, color='pink')
 plt.show()
 
 # put lat and lons into pandas df
-reg_lon_lat = pd.DataFrame({'longitude': US_pts.longitude, 'latitude': US_pts.latitude})
+reg_lon_lat = pd.DataFrame({'longitude': US_pts.longitude, 'latitude': US_pts.latitude})'''
 
 # %% # # # # # # # # #  RUN NEURAL NETWORK FOR EACH LOCATION AND SEED # # # # # # # # # #
 for c1, xxx in enumerate(CONUS_lons):
@@ -457,7 +457,7 @@ for c1, xxx in enumerate(CONUS_lons):
                 ActClass = hit_miss[:, 2]  # Actual Classes (least to most confident)
                 CorrOrNo = hit_miss[:, 0]  # array for if pred correct [1] or not [0] (least to most confident)
 
-                # # # # # # # # # # # ACCURACY & HEAT MAP INFO # # # # # # # # # #
+                '''# # # # # # # # # # # ACCURACY & HEAT MAP INFO # # # # # # # # # #
 
                 # If we want to only look at seeds that are "good enough" - cross a certain threshold, we use this
                 CP_Corr_R = []
@@ -560,10 +560,10 @@ for c1, xxx in enumerate(CONUS_lons):
             if Reg != 0:
                 loc_arr += [locos]
                 loc_arrCN += [locosCN]
-                loc_arrCLS += [locosCLS]
+                loc_arrCLS += [locosCLS]'''
 print('DONE')
 
-# %% # # # # # # # # #  ACCURACY MAPS - PLOTTING # # # # # # # # # #
+'''# %% # # # # # # # # #  ACCURACY MAPS - PLOTTING # # # # # # # # # #
 
 # Map inputs
 ecolor = 'dimgray'  # makes lakes and borders light gray
@@ -717,7 +717,7 @@ for inf in range(len(info_list)):
     plt.savefig(
         'Heatmap_{}_{}_Lt{}{}N{}Lr{}'.format(out_names[inf], Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
         dpi=300)
-    plt.show()
+    plt.show()'''
 
 # %% # # # # # # # # #  EXTRA STUFF # # # # # # # # # #
 
