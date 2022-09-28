@@ -18,7 +18,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import warnings
 import matplotlib.colors as colors
-from Functions import make_model
+from Functions import make_model, savitzky_golay
 
 sys.path.append('')  # add path to network, metrics and plot
 warnings.filterwarnings('ignore', "GeoSeries.isna", UserWarning)
@@ -507,10 +507,9 @@ for c1, xxx in enumerate(CONUS_lons):
                                     callbacks=callbacks)
                 stop_time = time.time()
 
-                # -------------------------------- PREDICTION & OUTPUT INFO --------------------------------
+                # # # # # # # # # # # PREDICTION & OUTPUT INFO # # # # # # # # # #
 
                 # Grab loss and acc values from training
-
                 out = history.history
                 out_list = list(out.items())
 
@@ -523,7 +522,6 @@ for c1, xxx in enumerate(CONUS_lons):
                 ep = np.arange(1, len(acc) + 1, 1)  # epoch array
 
                 # Output from prediction
-
                 preds = model.predict(x_val_shp)  # Confidences for all classes
                 max_idxs = np.argmax(preds, axis=1)  # index of winning confidence
 
@@ -552,9 +550,7 @@ for c1, xxx in enumerate(CONUS_lons):
                 ActClass = hit_miss[:, 2]  # Actual Classes (least to most confident)
                 CorrOrNo = hit_miss[:, 0]  # array for if pred correct [1] or not [0] (least to most confident)
 
-                # tf.print(f"Elapsed time during fit = {stop_time - start_time:.2f} seconds\n")
-
-                # -------------------------------- PLOTS --------------------------------    
+                # # # # # # # # # # # ACCURACY & HEAT MAP INFO # # # # # # # # # #
 
                 # Then build the line plot 
 
@@ -617,7 +613,6 @@ for c1, xxx in enumerate(CONUS_lons):
 
                         # Get specific class
                         CorrCountX_pd = CorrCount_pd[CorrCount_pd["WinClass"] == iii]
-                        print(CorrCountX_pd)
 
                         # Correct samples only (for calculating accuracy)
                         CorrCountX_list = CorrCountX_pd.iloc[:, 0]
@@ -625,9 +620,9 @@ for c1, xxx in enumerate(CONUS_lons):
 
                         # Calculate Accuracy for Predicted Class
                         if len(CorrCountX_list) == 0:
-                            acc_lists[iii+1] += [np.nan]
+                            acc_lists[iii + 1] += [np.nan]
                         else:
-                            acc_lists[iii+1] += [CorrCountX / len(CorrCountX_list)]
+                            acc_lists[iii + 1] += [CorrCountX / len(CorrCountX_list)]
 
                         # Calculate Accuracy for Actual Class
                         CorrCountX_pd_a = CorrCount_pd[CorrCount_pd["ActClass"] == iii]
@@ -647,9 +642,9 @@ for c1, xxx in enumerate(CONUS_lons):
                             # Accuracy calculation
                             if 1 in szn_pd['Corr?'].values:  # Check if there's any correct values for this szn / class
                                 CorrCountsumX = szn_pd['Corr?'].value_counts()[1]
-                                acc_lists[11 + iii*4 + ii] += [CorrCountsumX / len(szn_pd['Index'])]
+                                acc_lists[11 + iii * 4 + ii] += [CorrCountsumX / len(szn_pd['Index'])]
                             else:
-                                acc_lists[11 + iii*4 + ii] += [np.nan]
+                                acc_lists[11 + iii * 4 + ii] += [np.nan]
 
                 # If we are throwing out certain seeds, this counts how many we throw out
                 else:
@@ -665,35 +660,83 @@ for c1, xxx in enumerate(CONUS_lons):
                 loc_arrCLS += [locosCLS]
 print('DONE')
 
-# %%
-def savitzky_golay(y, window_size, order, deriv=0, rate=1):
-    import numpy as np
-    from math import factorial
+# %% # # # # # # # # #  ACCURACY MAPS - PLOTTING # # # # # # # # # #
 
-    try:
-        window_size = np.abs(int(window_size))
-        order = np.abs(int(order))
-    except ValueError as msg:
-        raise ValueError("window_size and order have to be of type int")
-    if window_size % 2 != 1 or window_size < 1:
-        raise TypeError("window_size size must be a positive odd number")
-    if window_size < order + 2:
-        raise TypeError("window_size is too small for the polynomials order")
-    order_range = range(order + 1)
-    half_window = (window_size - 1) // 2
-    # precompute coefficients
-    b = np.mat([[k ** i for i in order_range] for k in range(-half_window, half_window + 1)])
-    m = np.linalg.pinv(b).A[deriv] * rate ** deriv * factorial(deriv)
-    # pad the signal at the extremes with
-    # values taken from the signal itself
-    firstvals = y[0] - np.abs(y[1:half_window + 1][::-1] - y[0])
-    lastvals = y[-1] + np.abs(y[-half_window - 1:-1][::-1] - y[-1])
-    y = np.concatenate((firstvals, y, lastvals))
-    return np.convolve(m[::-1], y, mode='valid')
+# Map inputs
+ecolor = 'dimgray'  # makes lakes and borders light gray
+fsize = 24  # fontsize
+lons_p = np.append(CONUS_lons, CONUS_lons[-1] + 2) - 1  # pcolor are boxes, so set start and end pts of the boxes
+lats_p = np.append(CONUS_lats, CONUS_lats[-1] + 2) - 1  # lons_p / lats_p make it so box centers are lons / lats
+Seas_Name = [' - Summer', ' - Fall', ' - Winter', ' - Spring', '']
+Cls_Name = ['UFS Underestimates', 'UFS Underestimates', 'UFS Underestimates', 'All Samples']
+
+# Make Each Map
+for acm in range(Acc_Map_Data.shape[0]):
+
+    # Set-up maps
+    fig = plt.figure(figsize=(10, 8))
+
+    # Define map type and its size
+    ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
+    ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
+
+    # Set levels and output name variables
+    if acm == 0:
+        vmin = .325  # all seasons - all classes
+        vmax = .5
+        vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.4125, vmax=vmax)
+        seas = 4
+        clss = 3
+        Pr = 0
+    elif acm < 7:
+        vmin = .3  # all seasons - specific class
+        vmax = .7
+        vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.5, vmax=vmax)
+        seas = 4
+        clss = (acm + 2) % 3
+        if acm < 4:
+            Pr = 0  # Predicted Class (0) or True Class (0)
+        else:
+            Pr = 1
+    elif acm < 11:
+        vmin = .35  # specific season - all classes
+        vmax = .6
+        vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.475, vmax=vmax)
+        seas = (acm + 1) % 4
+        clss = 3
+        Pr = 0
+    else:
+        vmin = .4  # specific season - specific class
+        vmax = 1.0
+        vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.7, vmax=vmax)
+        seas = (acm + 1) % 4
+        clss = (acm - 11) // 4
+        Pr = 0
+
+    # Add features
+    # ax.add_feature(cfeature.LAND, color='white')
+    ax.add_feature(cfeature.COASTLINE)
+    ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
+    ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
+    ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
+
+    # plot
+    cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[acm].T, vmin=vmin, vmax=vmax, norm=vmid,
+                   cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
+
+    # plot info
+    cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
+    plt.title('Accuracy of Predicting {} Errors in the UFS{}\nLead Time of 10-14 days {}'.format(Pred, Seas_Name[seas],
+                                                                                                 Cls_Name[clss]),
+              fontsize=fsize)
+    plt.tight_layout()
+    plt.savefig('AccMap_{}_Se{}Cls{}Pr{}Lt{}{}N{}Lr{}'.format(Pred, seas, clss, Pr, lead_time1, lead_time2, nodes,
+                                                              str(LR).split('.')[1]), dpi=300)
+    plt.show()
 
 
-# %%
-# Speicify which class we're interested in
+# %% # # # # # # # # #  HEAT MAPS - PLOTTING # # # # # # # # # #
+# Specify which class we're interested in
 class_num = 0
 
 # Make a "total" hmap that can we can divide by to normalize hamps
@@ -965,773 +1008,3 @@ ax.add_feature(cfeature.LAKES.with_scale('50m'), color='black', linewidths=0.5)
 plt.savefig('del')
 plt.show()'''
 
-# %%
-
-ecolor = 'dimgray'
-fsize = 24
-
-# FULL
-
-# Since pcolor are boxes, we have to set start and end pts of the boxes: lons_p and lats_p make it so the center of the box
-# are the lons and lats
-lons_p = np.append(CONUS_lons, CONUS_lons[-1] + 2) - 1
-lats_p = np.append(CONUS_lats, CONUS_lats[-1] + 2) - 1
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Set levels
-vmin = .325
-vmax = .5
-vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.4125, vmax=vmax)
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[0].T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS\nLead Time of 10-14 days (All Samples)', fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_all_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]), dpi=300)
-plt.show()
-# print(map_full)
-
-# UNDER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Set levels
-vmin = .3
-vmax = .7
-vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.5, vmax=vmax)
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[1].T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS\nLead Time of 10-14 days (UFS Underestimates)', fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_und_PredClass_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_und)
-
-# ACCURATE
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[2].T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS\nLead Time of 10-14 days (UFS Accurate Estimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_acc_PredClass_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_acc)
-
-# OVER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[3].T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS\nLead Time of 10-14 days (UFS Overestimates)', fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_ovr_PredClass_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-
-# %% True Class
-
-# UNDER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Set levels
-vmin = .3
-vmax = .7
-vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.5, vmax=vmax)
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plo
-cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[4].T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS\nLead Time of 10-14 days (UFS Underestimates)', fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_und_TrueClass_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_und)
-
-# ACCURATE
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[5].T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS\nLead Time of 10-14 days (UFS Accurate Estimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_acc_TrueClass_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_acc)
-
-# OVER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[6].T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS\nLead Time of 10-14 days (UFS Overestimates)', fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_ovr_TrueClass_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-
-# %% Summer
-
-# FULL
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Set levels
-vmin = .35
-vmax = .6
-vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.475, vmax=vmax)
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[7].T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Summer\nLead Time of 10-14 days (All Samples)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_all_sum_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_full)
-
-# UNDER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Set levels
-vmin = .4
-vmax = 1.0
-vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.7, vmax=vmax)
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plo
-cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[11].T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Summer\nLead Time of 10-14 days (UFS Underestimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_und_sum_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_und)
-
-# ACCURATE
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[15].T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Summer\nLead Time of 10-14 days (UFS Accurate Estimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_acc_sum_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_acc)
-
-# OVER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_sum_ovr.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Summer\nLead Time of 10-14 days (UFS Overestimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_ovr_sum_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-
-# %% Fall
-
-# FULL
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Set levels
-vmin = .35
-vmax = .6
-vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.475, vmax=vmax)
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_fall_full.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Fall\nLead Time of 10-14 days (All Samples)', fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_all_fall_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_full)
-
-# UNDER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Set levels
-vmin = .4
-vmax = 1.0
-vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.7, vmax=vmax)
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plo
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_fall_und.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Fall\nLead Time of 10-14 days (UFS Underestimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_und_fall_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_und)
-
-# ACCURATE
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_fall_acc.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Fall\nLead Time of 10-14 days (UFS Accurate Estimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_acc_fall_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_acc)
-
-# OVER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_fall_ovr.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Fall\nLead Time of 10-14 days (UFS Overestimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_ovr_fall_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-
-# %% Winter
-
-# FULL
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Set levels
-vmin = .35
-vmax = .6
-vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.475, vmax=vmax)
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_wint_full.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Winter\nLead Time of 10-14 days (All Samples)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_all_wint_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_full)
-
-# UNDER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Set levels
-vmin = .4
-vmax = 1.0
-vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.7, vmax=vmax)
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plo
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_wint_und.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Winter\nLead Time of 10-14 days (UFS Underestimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_und_wint_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-
-# ACCURATE
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_wint_acc.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Winter\nLead Time of 10-14 days (UFS Accurate Estimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_acc_wint_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-
-# OVER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_wint_ovr.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Winter\nLead Time of 10-14 days (UFS Overestimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_ovr_wint_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-
-# %% Spring
-
-# FULL
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Set levels
-vmin = .35
-vmax = .6
-vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.475, vmax=vmax)
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_spr_full.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Spring\nLead Time of 10-14 days (All Samples)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_all_spr_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-
-# UNDER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Set levels
-vmin = .4
-vmax = 1.0
-vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.6, vmax=vmax)
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plo
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_spr_und.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Spring\nLead Time of 10-14 days (UFS Underestimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_und_spr_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-# print(map_und)
-
-# ACCURATE
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_spr_acc.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Spring\nLead Time of 10-14 days (UFS Accurate Estimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_acc_spr_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-
-# OVER
-
-fig = plt.figure(figsize=(10, 8))
-
-# Define map type and its size
-ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
-ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
-
-# Add lat and lon grid lines
-# Add variety of features
-# ax.add_feature(cfeature.LAND, color='white')
-ax.add_feature(cfeature.COASTLINE)
-
-# Can also supply matplotlib kwargs
-ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
-ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
-ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
-
-# plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_spr_ovr.T, vmin=vmin, vmax=vmax, norm=vmid,
-               cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
-cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
-
-plt.title('Accuracy of Predicting h500 Errors in the UFS - Spring\nLead Time of 10-14 days (UFS Overestimates)',
-          fontsize=fsize)
-plt.tight_layout()
-plt.savefig('AccMap_{}_ovr_spr_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
