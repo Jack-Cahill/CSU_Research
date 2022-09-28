@@ -1,8 +1,3 @@
-"""
-Created on Thu Jul 28 09:38:16 2022
-
-@author: jcahill4
-"""
 
 import geopandas as gp
 import tensorflow as tf
@@ -39,8 +34,8 @@ cmap = plt.get_cmap('cmr.redshift')  # MPL
 # %% -------------------------------- INPUTS --------------------------------
 
 # Define a set of random seeds (or just one seed if you want to check)
-r = [92, 95, 100, 137, 141, 142]
-r = np.arange(88, 89, 1)
+seeds = [92, 95, 100, 137, 141, 142]
+seeds = np.arange(88, 89, 1)
 
 # Define Input Map variable
 variable = 'olr'
@@ -64,7 +59,7 @@ elif Pred == 'h500':
 cdata = 'clima_gefs'
 bignum = 862  # selects testing / training data
 smlnum = 180  # " "
-LT_tot = 35  # how many total lead times are there?
+LT_tot = 35  # how many total lead times are there in the UFS forecast?
 
 # Decrease input resolution?
 dec = 0  # 0 if normal, 1 if decrease
@@ -85,19 +80,26 @@ else:
 
 # # # # # # # # # #  NEURAL NETWORK INPUTS # # # # # # # # # #
 
-error = 0  # Are we prediting UFS errors? (0 if error, 1 if no error)
 lead_time1 = 10  # will be averaged from LT1-LT2
 lead_time2 = 14
 epochs = 10_000
 nodes = 20
 batch_size = 32  # Not identified in plot naming scheme
 LR = 0.01  # Learning Rate
+Trash = 0  # If we wanted to throw out any seeds, this would count how many seeds we toss
 Classes = 3  # 3 classes (-1: Under_est, 0: Acc_est, 1: Over_est)
-PATIENCE = 20
-MinMax = 0  # 0 if minimizing loss and 1 if maximizing accuracy
 TTLoco = 0  # Order of Training and Validation datasets (0 if TrainVal, 1 if ValTrain)
 RIDGE1 = 0.0  # Regularization Techniques
 DROPOUT = 0.3
+PATIENCE = 20
+MinMax = 0  # 0 if minimizing loss and 1 if maximizing accuracy
+
+if MinMax == 0:
+    monitor = 'val_loss'
+    mode = 'min'
+else:
+    monitor = 'val_prediction_accuracy'
+    mode = 'max'
 
 # # # # # # # # # #  READ IN DATA # # # # # # # # # #
 
@@ -248,11 +250,11 @@ for c1, xxx in enumerate(CONUS_lons):
         df_chk = reg_lon_lat.loc[reg_lon_lat.latitude == xx]
         if (xxx - 360) in df_chk.longitude.unique():
 
-            # count many grid points we're running for and print grid poiny
+            # count many grid points we're running for and print grid point
             counter = counter + 1
             print(xx, xxx)
 
-            # Create lists of lists (inner lists contain the average for each seed)(outer lists are for each cls / szn)
+            # Create lists of lists (inner lists contain the average for each seed) (outer lists are for each cls / szn)
             acc_lists = [[] for _ in range(acc_map_tot)]
 
             # arrays for 4 adjacent grid points
@@ -261,8 +263,9 @@ for c1, xxx in enumerate(CONUS_lons):
                 locosCN = []
                 locosCLS = []
 
-            # START HERE
-            for x in r:
+            # Loop through seeds
+            for x in seeds:
+
                 # Select map point
                 lat_sliceP = slice(xx - .01, xx + .01)
                 lon_sliceP = slice(xxx - .01, xxx + .01)
@@ -272,155 +275,82 @@ for c1, xxx in enumerate(CONUS_lons):
                 np.random.seed(NP_SEED)
                 tf.random.set_seed(NP_SEED)
 
-                # Pred
-
+                # Prediction data
                 # Read in data (UFS and Obs)
                 ds_UFS1 = ds_UFS1_base['{}'.format(Pred)].sel(lat=lat_sliceP, lon=lon_sliceP)
                 ds_obs1 = ds_obs1_base['{}'.format(Pred)].sel(lat=lat_sliceP, lon=lon_sliceP)
 
-                # Predictor (for error 1)
-                # Read in data
-                ds_UFS = ds_UFS_base['{}'.format(Pred)].sel(lat=lat_sliceP, lon=lon_sliceP)
+                # # # # # # # # # # READ IN DATA - TRIPLE CHECKED # # # # # # # # # #
 
-                # # # DATA BEING READ IN AND MERGED CORRECTLY HAS BEEN TRIPLE CHECKED
-                if error == 0:
+                # PART1: MERGE UFS AND OBS DATA SO THEY MATCH
+                z = 0
+                while z < len(ds_UFS1.time.values) / LT_tot:
 
-                    # PART1: WE START BY ONLY GRABBING A FEW UFS DATES AND ALL OBS. 
-                    # THEN THE UFS AND OBS ARE MERGED SO THEY MATCH
-                    z = 0
-                    while z < len(ds_UFS1.time.values) / LT_tot:
+                    # Grab UFS data between lead_times
+                    UFS = ds_UFS1[z * LT_tot:z * LT_tot + LT_tot]
+                    UFS = UFS[lead_time1:lead_time2 + 1]
 
-                        # Grab UFS data between lead_times
-                        UFS = ds_UFS1[z * LT_tot:z * LT_tot + LT_tot]
-                        UFS = UFS[lead_time1:lead_time2 + 1]
+                    # Convert UFS data to pandas
+                    UFS = list(zip(UFS.time.values, UFS.values.flatten()))
+                    UFS = pd.DataFrame(UFS)
+                    UFS.columns = ['time', '{} UFS'.format(Pred)]
 
-                        # Convert UFS data to pandas
-                        UFS = list(zip(UFS.time.values, UFS.values.flatten()))
-                        UFS = pd.DataFrame(UFS)
-                        UFS.columns = ['time', '{} UFS'.format(Pred)]
+                    if z == 0:
+                        ds_UFS10 = UFS
+                    else:
+                        ds_UFS10 = pd.concat([ds_UFS10, UFS])
+                    z = z + 1
 
-                        if z == 0:
-                            ds_UFS10 = UFS
-                        else:
-                            ds_UFS10 = pd.concat([ds_UFS10, UFS])
-                        z = z + 1
+                # Convert Obs to pandas
+                ds_obsp_l = list(zip(ds_obs1.time.values, ds_obs1.values.flatten()))
+                ds_obsp = pd.DataFrame(ds_obsp_l)
+                ds_obsp.columns = ['time', '{} Obs'.format(Pred)]
 
-                    # Convert Obs to pandas
-                    ds_obsp_l = list(zip(ds_obs1.time.values, ds_obs1.values.flatten()))
-                    ds_obsp = pd.DataFrame(ds_obsp_l)
-                    ds_obsp.columns = ['time', '{} Obs'.format(Pred)]
+                # Remove time (non-date) aspect
+                ds_UFS10['time'] = pd.to_datetime(ds_UFS10['time']).dt.date
+                ds_obsp['time'] = pd.to_datetime(ds_obsp['time']).dt.date
 
-                    # Remove time (non-date) aspect
-                    ds_UFS10['time'] = pd.to_datetime(ds_UFS10['time']).dt.date
-                    ds_obsp['time'] = pd.to_datetime(ds_obsp['time']).dt.date
+                # Merge UFS and obs
+                ds10x = pd.merge(ds_obsp, ds_UFS10, on='time')
 
-                    # Merge UFS and obs
-                    ds10x = pd.merge(ds_obsp, ds_UFS10, on='time')
-                    # # # DATA BEING READ IN AND MERGED CORRECTLY HAS BEEN TRIPLE CHECKED
+                # PART 2: AVERAGE EACH FILE BETWEEN LEAD_TIMES X-Y, SO WE HAVE TWO VECTORS (OBS AND UFS)
+                divisor = int(lead_time2 - lead_time1 + 1)
+                ds10x = ds10x.sort_values(by='time')
+                ds10x = ds10x.drop(['time'], axis=1)
+                ds10 = ds10x.groupby(np.arange(len(ds10x)) // divisor).mean()
 
-                    # PART 2: AVERAGE EACH FILE BETWEEN LEAD_TIMES 10-14, SO WE HAVE TWO VECTORS (OBS AND UFS)
-                    # Mean over LT10-14
-                    divisor = int(lead_time2 - lead_time1 + 1)
-                    ds10x = ds10x.sort_values(by='time')
-                    ds10x = ds10x.drop(['time'], axis=1)
-                    ds10 = ds10x.groupby(np.arange(len(ds10x)) // divisor).mean()
-                    # # # DATA BEING AVERAGED HAS BEEN TRIPLE CHECKED
+                # PART 3: CREATE TWO MORE COLUMNS/VECTORS FOR ERRORS AND CLASSES
+                # Create new column for errors
+                ds10['Error'] = ds10['{} UFS'.format(Pred)] - ds10['{} Obs'.format(Pred)]
 
-                    # PART 3: CREATE TWO MORE COLUMNS/VECTORS FOR ERRORS AND CLASSES
-
+                if Classes == 3:
                     # Find ranges for classes (this uses 3 classes)
-                    ds10['Error'] = ds10['{} UFS'.format(Pred)] - ds10['{} Obs'.format(Pred)]
+                    q1 = ds10['Error'].quantile(0.33)
+                    q2 = ds10['Error'].quantile(0.67)
 
-                    if Classes == 3:
-                        # Find ranges for classes (this uses 3 classes)
-                        q1 = ds10['Error'].quantile(0.33)
-                        q2 = ds10['Error'].quantile(0.67)
+                    # Create classes
+                    ds10.loc[ds10['Error'].between(float('-inf'), q1), 'Class'] = 0
+                    ds10.loc[ds10['Error'].between(q1, q2), 'Class'] = 1
+                    ds10.loc[ds10['Error'].between(q2, float('inf')), 'Class'] = 2
+                    ds_UFSp = ds10
 
-                        # Create classes
-                        ds10.loc[ds10['Error'].between(float('-inf'), q1), 'Class'] = 0
-                        ds10.loc[ds10['Error'].between(q1, q2), 'Class'] = 1
-                        ds10.loc[ds10['Error'].between(q2, float('inf')), 'Class'] = 2
-                        ds_UFSp = ds10
+                elif Classes == 5:
+                    # Find ranges for classes (this uses 5 classes)
+                    q1 = ds10['Error'].quantile(0.2)
+                    q2 = ds10['Error'].quantile(0.4)
+                    q3 = ds10['Error'].quantile(0.6)
+                    q4 = ds10['Error'].quantile(0.8)
 
-                    elif Classes == 5:
-                        # Find ranges for classes (this uses 3 classes)
-                        q1 = ds10['Error'].quantile(0.2)
-                        q2 = ds10['Error'].quantile(0.4)
-                        q3 = ds10['Error'].quantile(0.6)
-                        q4 = ds10['Error'].quantile(0.8)
+                    # Create classes
+                    ds10.loc[ds10['Error'].between(float('-inf'), q1), 'Class'] = 0
+                    ds10.loc[ds10['Error'].between(q1, q2), 'Class'] = 1
+                    ds10.loc[ds10['Error'].between(q2, q3), 'Class'] = 2
+                    ds10.loc[ds10['Error'].between(q3, q4), 'Class'] = 3
+                    ds10.loc[ds10['Error'].between(q4, float('inf')), 'Class'] = 4
+                    ds_UFSp = ds10
 
-                        # Create classes
-                        ds10.loc[ds10['Error'].between(float('-inf'), q1), 'Class'] = 0
-                        ds10.loc[ds10['Error'].between(q1, q2), 'Class'] = 1
-                        ds10.loc[ds10['Error'].between(q2, q3), 'Class'] = 2
-                        ds10.loc[ds10['Error'].between(q3, q4), 'Class'] = 3
-                        ds10.loc[ds10['Error'].between(q4, float('inf')), 'Class'] = 4
-                        ds_UFSp = ds10
-
-                elif error == 1:
-
-                    # PART1: WE START BY ONLY GRABBING A FEW UFS DATES AND ALL OBS. 
-                    # THEN THE UFS AND OBS ARE MERGED SO THEY MATCH
-                    z = 0
-                    while z < len(ds_UFS1.time.values) / LT_tot:
-
-                        # Grab UFS data between lead_times
-                        UFS = ds_UFS1[z * LT_tot:z * LT_tot + LT_tot]
-                        UFS = UFS[lead_time1:lead_time2 + 1]
-
-                        # Convert UFS data to pandas
-                        UFS = list(zip(UFS.time.values, UFS.values.flatten()))
-                        UFS = pd.DataFrame(UFS)
-                        UFS.columns = ['time', '{} UFS'.format(Pred)]
-
-                        if z == 0:
-                            ds_UFS10 = UFS
-                        else:
-                            ds_UFS10 = pd.concat([ds_UFS10, UFS])
-                        z = z + 1
-
-                    ds10x = ds_UFS10
-
-                    # PART 2: AVERAGE EACH FILE BETWEEN LEAD_TIMES 10-14, SO WE HAVE TWO VECTORS (OBS AND UFS)
-
-                    # Mean over LT
-                    divisor = int(lead_time2 - lead_time1 + 1)
-                    ds10x = ds10x.sort_values(by='time')
-                    ds10x = ds10x.drop(['time'], axis=1)
-                    ds10 = ds10x.groupby(np.arange(len(ds10x)) // divisor).mean()
-
-                    # PART 3: CREATE TWO MORE COLUMNS/VECTORS FOR ERRORS AND CLASSES
-
-                    if Classes == 3:
-                        # Find ranges for classes (this uses 3 classes)
-                        q1 = ds10['{} UFS'.format(Pred)].quantile(0.33)
-                        q2 = ds10['{} UFS'.format(Pred)].quantile(0.67)
-
-                        # Create classes
-                        ds10.loc[ds10['{} UFS'.format(Pred)].between(float('-inf'), q1), 'Class'] = 0
-                        ds10.loc[ds10['{} UFS'.format(Pred)].between(q1, q2), 'Class'] = 1
-                        ds10.loc[ds10['{} UFS'.format(Pred)].between(q2, float('inf')), 'Class'] = 2
-                        ds_UFSp = ds10
-
-                    elif Classes == 5:
-                        # Find ranges for classes (this uses 3 classes)
-                        q1 = ds10['{} UFS'.format(Pred)].quantile(0.2)
-                        q2 = ds10['{} UFS'.format(Pred)].quantile(0.4)
-                        q3 = ds10['{} UFS'.format(Pred)].quantile(0.6)
-                        q4 = ds10['{} UFS'.format(Pred)].quantile(0.8)
-
-                        # Create classes
-                        ds10.loc[ds10['{} UFS'.format(Pred)].between(float('-inf'), q1), 'Class'] = 0
-                        ds10.loc[ds10['{} UFS'.format(Pred)].between(q1, q2), 'Class'] = 1
-                        ds10.loc[ds10['{} UFS'.format(Pred)].between(q2, q3), 'Class'] = 2
-                        ds10.loc[ds10['{} UFS'.format(Pred)].between(q3, q4), 'Class'] = 3
-                        ds10.loc[ds10['{} UFS'.format(Pred)].between(q4, float('inf')), 'Class'] = 4
-                        ds_UFSp = ds10
-
-                # DATA RETRIEVAL
-
-                # Run a loop so all the inout variable obs maps are available
-                # (this is before the code is split into Training and Validation)
+                # PART 4: SEPARATE DATA
+                # Create array of all input maps
                 x = 0
                 ALLx = []
                 while x < len(ds['{} obs'.format(variable)]):
@@ -428,7 +358,7 @@ for c1, xxx in enumerate(CONUS_lons):
                     x = x + 1
                 ALLx = np.array(ALLx)
 
-                # Get only Classes from pandas Predictor array
+                # Create array of all classes for input maps
                 y = 0
                 ALLy = []
                 while y < len(ds_UFSp['Class']):
@@ -437,12 +367,10 @@ for c1, xxx in enumerate(CONUS_lons):
                 ALLy = np.array(ALLy)
                 ALLy = ALLy.astype(int)
 
-                # # # # # # ALLx and ALLy  HAS BEEN TRIPLE CHECKED AND ITS CORRECT
-                # SPLITTING UP DATA
-
+                # Split data in training and validation data
                 if TTLoco == 0:
-                    x_train = ALLx[:bignum]
-                    y_train = ALLy[:bignum]
+                    x_train = ALLx[:bignum]  # input maps w/ shape (bignum, 50, 241) : (# cases, lats, lons)
+                    y_train = ALLy[:bignum]  # predicted error classes of the area of interest shape (bignum)
                     x_val = ALLx[bignum:]
                     y_val = ALLy[bignum:]
                 else:
@@ -450,9 +378,6 @@ for c1, xxx in enumerate(CONUS_lons):
                     y_val = ALLy[:smlnum]
                     x_train = ALLx[smlnum:]
                     y_train = ALLy[smlnum:]
-
-                # x_train are the input maps w/ shape (bignum, 50, 241) : (# cases, lats, lons)
-                # y_train are the predicted error classes of the area of interest shape (bignum)
 
                 # Change x_train and x_val shape if we wanted to decrease input map resolution
                 if dec == 1:
@@ -464,24 +389,10 @@ for c1, xxx in enumerate(CONUS_lons):
                     x_train_shp = x_train.reshape(bignum, len(lats) * len(lons))
                     x_val_shp = x_val.reshape(smlnum, len(lats) * len(lons))
 
-                # -------------------------------- MAKE NN --------------------------------
+                # # # # # # # # # # BUILD NEURAL NETWORK # # # # # # # # # #
 
-                if MinMax == 0:
-                    es_callback = tf.keras.callbacks.EarlyStopping(  # monitor='val_prediction_accuracy',
-                        monitor='val_loss',
-                        patience=PATIENCE,
-                        # mode='max',
-                        mode='min',
-                        restore_best_weights=True,
-                        verbose=0)
-                else:
-                    es_callback = tf.keras.callbacks.EarlyStopping(monitor='val_prediction_accuracy',
-                                                                   # monitor='val_loss',
-                                                                   patience=PATIENCE,
-                                                                   mode='max',
-                                                                   # mode='min',
-                                                                   restore_best_weights=True,
-                                                                   verbose=0)
+                es_callback = tf.keras.callbacks.EarlyStopping(monitor=monitor, patience=PATIENCE, mode=mode,
+                                                               restore_best_weights=True, verbose=0)
                 callbacks = [es_callback]
 
                 model, loss_function = make_model(nodes, x_train_shp, RIDGE1, DROPOUT, NP_SEED, LR, y_train)
@@ -495,7 +406,7 @@ for c1, xxx in enumerate(CONUS_lons):
                 onehotlabels = enc.fit_transform(np.array(y_val).reshape(-1, 1)).toarray()
                 hotlabels_val = onehotlabels[:, :model.output_shape[-1]]
 
-                # -------------------------------- TRAINING NETWORK --------------------------------
+                # # # # # # # # # # TRAIN NETWORK # # # # # # # # # #
 
                 start_time = time.time()
                 history = model.fit(x_train_shp, hotlabels_train,
@@ -513,34 +424,31 @@ for c1, xxx in enumerate(CONUS_lons):
                 out = history.history
                 out_list = list(out.items())
 
+                # training loss
                 loss = out_list[0]
-                loss = loss[1]  # training loss
+                loss = loss[1]
 
+                # acc of validation
                 acc = out_list[5]
-                acc = np.array(acc[1]) * 100  # acc of validation
+                acc = np.array(acc[1]) * 100
 
-                ep = np.arange(1, len(acc) + 1, 1)  # epoch array
+                # Confidences
+                Conf_all = model.predict(x_val_shp)  # Confidences for all classes
+                WConf = np.argmax(Conf_all, axis=1)  # index of winning confidence
+                Conf = np.amax(Conf_all, 1)  # array of just the winning confidences
 
-                # Output from prediction
-                preds = model.predict(x_val_shp)  # Confidences for all classes
-                max_idxs = np.argmax(preds, axis=1)  # index of winning confidence
-
-                # First make an array of all the times when our array is correct [1] or not [0]
+                # Make an array of all the times when our array is correct [1] or not [0]
                 Correct_R = []
                 k = 0
-                while k < len(max_idxs):
-                    if max_idxs[k] == y_val[k]:
+                while k < len(WConf):
+                    if WConf[k] == y_val[k]:
                         Correct_R += [1]
                     else:
                         Correct_R += [0]
                     k = k + 1
                 Correct_R = np.array(Correct_R)
 
-                # Make an array of all the confidences (largest one for each row)
-                Conf = preds  # Confidences for all classes
-                WConf = max_idxs  # index of winning confidence
-
-                Conf = np.amax(Conf, 1)  # array of just the winning confidences
+                # Organize confidences
                 idx = np.arange(0, len(Conf), 1)  # array of idx of map (0 is first map in validation)
                 hit_miss1 = np.stack((Correct_R, Conf, y_val, WConf, idx), axis=-1)
                 hit_miss = hit_miss1[np.argsort(hit_miss1[:, 1])]  # sort from least to most confident
@@ -552,16 +460,12 @@ for c1, xxx in enumerate(CONUS_lons):
 
                 # # # # # # # # # # # ACCURACY & HEAT MAP INFO # # # # # # # # # #
 
-                # Then build the line plot 
-
+                # If we want to only look at seeds that are "good enough" - cross a certain threshold, we use this
                 CP_Corr_R = []
                 w = 0
                 while w < len(hit_miss[:, 0]):
                     CP_Corr_R += [(np.sum(hit_miss[:, 0][w:]) / len(hit_miss[:, 0][w:])) * 100]
                     w = w + 1
-
-                CPs = np.linspace(100, 0, num=13)
-                CPs = CPs[:-1]
                 CP_Corr_R = np.array(CP_Corr_R)
                 CP_Corr_R = np.mean(CP_Corr_R.reshape(-1, 9), axis=1)
 
@@ -668,7 +572,7 @@ fsize = 24  # fontsize
 lons_p = np.append(CONUS_lons, CONUS_lons[-1] + 2) - 1  # pcolor are boxes, so set start and end pts of the boxes
 lats_p = np.append(CONUS_lats, CONUS_lats[-1] + 2) - 1  # lons_p / lats_p make it so box centers are lons / lats
 Seas_Name = [' - Summer', ' - Fall', ' - Winter', ' - Spring', '']
-Cls_Name = ['UFS Underestimates', 'UFS Underestimates', 'UFS Underestimates', 'All Samples']
+Cls_Name = ['(UFS Underestimates)', '(UFS Underestimates)', '(UFS Underestimates)', '(All Samples)']
 
 # Make Each Map
 for acm in range(Acc_Map_Data.shape[0]):
@@ -736,24 +640,27 @@ for acm in range(Acc_Map_Data.shape[0]):
 
 
 # %% # # # # # # # # #  HEAT MAPS - PLOTTING # # # # # # # # # #
-# Specify which class we're interested in
+
+# Specify which class we're interested in plotting
 class_num = 0
 
-# Make a "total" hmap that can we can divide by to normalize hamps
+# Make a "total" hmap that can we can divide by to normalize the hmaps
 hmap_main = np.zeros((3, 9))
 for x in np.arange(-1, 2, 1):
     ENSOs = idx_all.loc[idx_all['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
         hmap_main[x + 1, y] = len(MJO_ENSO['Index'])
-print(hmap_main)
 
+# Organize necessary info for hmaps
 for xy in range(counter):
 
-    flat_idx = np.concatenate(loc_arr[xy]).ravel()
-    flat_CNO = np.concatenate(loc_arrCN[xy]).ravel()
-    flat_CLS = np.concatenate(loc_arrCLS[xy]).ravel()
+    # flatten each list (each seed has own array)
+    flat_idx = np.concatenate(loc_arr[xy]).ravel()     # index
+    flat_CNO = np.concatenate(loc_arrCN[xy]).ravel()   # correct or not?
+    flat_CLS = np.concatenate(loc_arrCLS[xy]).ravel()  # class
 
+    # Then combine the lists within our specified region
     if xy == 0:
         flat_idx_all = flat_idx
         flat_CNO_all = flat_CNO
@@ -764,136 +671,59 @@ for xy in range(counter):
         flat_CLS_all = np.concatenate([flat_CLS_all, flat_CLS])
 
 # Separate based on class and correct samples
-info_all_all = pd.DataFrame({'Index': flat_idx_all, 'CorrOrNo': flat_CNO_all, 'Class': flat_CLS_all})
-info_all_corr = info_all_all[info_all_all['CorrOrNo'] == 1].reset_index(drop=True)
-info_class_all = info_all_all[info_all_all['Class'] == class_num].reset_index(drop=True)
-info_class_corr = info_class_all[info_class_all['CorrOrNo'] == 1].reset_index(drop=True)
+all_all = pd.DataFrame({'Index': flat_idx_all, 'CorrOrNo': flat_CNO_all, 'Class': flat_CLS_all})
+all_corr = all_all[all_all['CorrOrNo'] == 1].reset_index(drop=True)
+class_all = all_all[all_all['Class'] == class_num].reset_index(drop=True)
+class_corr = class_all[class_all['CorrOrNo'] == 1].reset_index(drop=True)
 
-# Count indices
-info_all_all_count = info_all_all.groupby(['Index'])['Index'].count()
-info_all_corr_count = info_all_corr.groupby(['Index'])['Index'].count()
-info_class_all_count = info_class_all.groupby(['Index'])['Index'].count()
-info_class_corr_count = info_class_corr.groupby(['Index'])['Index'].count()
+# Put them in a list, so we can loop through them
+info_list = [all_all, all_corr, class_all, class_corr]
 
-info_all_all_count_df = info_all_all_count.to_frame()
-info_all_corr_count_df = info_all_corr_count.to_frame()
-info_class_all_count_df = info_class_all_count.to_frame()
-info_class_corr_count_df = info_class_corr_count.to_frame()
+# Output Names
+out_names = ['all_all', 'all_corr', '{}_all'.format(class_num), '{}_corr'.format(class_num)]
 
-info_all_all_idx = info_all_all_count_df.index  # Indices
-info_all_corr_idx = info_all_corr_count_df.index
-info_class_all_idx = info_class_all_count_df.index
-info_class_corr_idx = info_class_corr_count_df.index
+# Organize and plot each hmap
+for inf in range(len(info_list)):
 
-info_all_all_count = info_all_all_count_df['Index'].reset_index(drop=True)  # Count
-info_all_corr_count = info_all_corr_count_df['Index'].reset_index(drop=True)
-info_class_all_count = info_class_all_count_df['Index'].reset_index(drop=True)
-info_class_corr_count = info_class_corr_count_df['Index'].reset_index(drop=True)
+    # Count indices
+    info_count = info_list[inf].groupby(['Index'])['Index'].count()
+    info_count_df = info_count.to_frame()
+    info_idx = info_count_df.index                               # Indices
+    info_counts = info_count_df['Index'].reset_index(drop=True)  # Count
 
-# Convert index and counts into pandas array
-countpd_all_all = pd.DataFrame({'Index': info_all_all_idx, 'count': info_all_all_count})
-countpd_all_corr = pd.DataFrame({'Index': info_all_corr_idx, 'count': info_all_corr_count})
-countpd_class_all = pd.DataFrame({'Index': info_class_all_idx, 'count': info_class_all_count})
-countpd_class_corr = pd.DataFrame({'Index': info_class_corr_idx, 'count': info_class_corr_count})
+    # Convert index and counts into pandas array
+    countpd = pd.DataFrame({'Index': info_idx, 'count': info_counts})
 
-# merge with ENSO and MJO info
-EMJO_all_all = pd.merge(countpd_all_all, idx_all, on='Index')
-EMJO_all_corr = pd.merge(countpd_all_corr, idx_all, on='Index')
-EMJO_class_all = pd.merge(countpd_class_all, idx_all, on='Index')
-EMJO_class_corr = pd.merge(countpd_class_corr, idx_all, on='Index')
+    # Merge with ENSO and MJO info
+    EMJO = pd.merge(countpd, idx_all, on='Index')
 
-# Make relevant hmaps
-# Create heat map to show frequency of MJO and ENSO phases
-hmap = np.zeros((3, 9))
-for x in np.arange(-1, 2, 1):
-    ENSOs = EMJO_class_all.loc[EMJO_class_all['E_Phase'] == x]
-    for y in np.arange(0, 9, 1):
-        MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
-        hmap[x + 1, y] = len(MJO_ENSO['Index'])
-hmap = hmap / hmap_main
-print(hmap)
+    # Create hmap to show frequency of ENSO and MJO
+    hmap = np.zeros((3, 9))
+    for x in np.arange(-1, 2, 1):
+        ENSOs = EMJO.loc[EMJO['E_Phase'] == x]
+        for y in np.arange(0, 9, 1):
+            MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
+            hmap[x + 1, y] = len(MJO_ENSO['Index'])
+    hmap = hmap / hmap_main
 
-plt.imshow(hmap, cmap=plt.cm.Reds)
-plt.xlabel('MJO Phase')
-plt.ylabel('ENSO Phase')
-plt.title('Frequency of Oscillation Phase', fontsize=16)
-plt.xticks([0, 1, 2, 3, 4, 5, 6, 7, 8], ['None', 1, 2, 3, 4, 5, 6, 7, 8])
-plt.yticks([0, 1, 2], ['La Niña', 'Neutral', 'El Niño'])
-plt.colorbar(shrink=0.75, label='Frequency')
-plt.tight_layout()
-plt.savefig(
-    'HeatmapClass{}_{}_Lt{}{}N{}Lr{}'.format(class_num, Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-    dpi=300)
-plt.show()
+    # Plot hmap
+    plt.imshow(hmap, cmap=plt.cm.Reds)
+    plt.xlabel('MJO Phase')
+    plt.ylabel('ENSO Phase')
+    plt.title('Frequency of Oscillation Phase', fontsize=16)
+    plt.xticks([0, 1, 2, 3, 4, 5, 6, 7, 8], ['None', 1, 2, 3, 4, 5, 6, 7, 8])
+    plt.yticks([0, 1, 2], ['La Niña', 'Neutral', 'El Niño'])
+    plt.colorbar(shrink=0.75, label='Frequency')
+    plt.tight_layout()
+    plt.savefig(
+        'Heatmap_{}_{}_Lt{}{}N{}Lr{}'.format(out_names[inf], Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
+        dpi=300)
+    plt.show()
 
-hmapCN = np.zeros((3, 9))
-for x in np.arange(-1, 2, 1):
-    ENSOs_CN = EMJO_class_corr.loc[EMJO_class_corr['E_Phase'] == x]
-    for y in np.arange(0, 9, 1):
-        MJO_ENSO_CN = ENSOs_CN.loc[ENSOs_CN['M_Phase'] == y]
-        hmapCN[x + 1, y] = len(MJO_ENSO_CN['Index'])
-hmapCN = hmapCN / hmap_main
-print(hmapCN)
+# %% # # # # # # # # #  EXTRA STUFF # # # # # # # # # #
 
-plt.imshow(hmapCN, cmap=plt.cm.Reds)
-plt.xlabel('MJO Phase')
-plt.ylabel('ENSO Phase')
-plt.title('Frequency of Oscillation Phase\n(Correctly Predicted Samples)', fontsize=16)
-plt.xticks([0, 1, 2, 3, 4, 5, 6, 7, 8], ['None', 1, 2, 3, 4, 5, 6, 7, 8])
-plt.yticks([0, 1, 2], ['La Niña', 'Neutral', 'El Niño'])
-plt.colorbar(shrink=0.75, label='Frequency')
-plt.tight_layout()
-plt.savefig(
-    'HeatmapClass{}Corr_{}_Lt{}{}N{}Lr{}'.format(class_num, Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-    dpi=300)
-plt.show()
-
-hmap_all_all = np.zeros((3, 9))
-for x in np.arange(-1, 2, 1):
-    ENSOs_CN = EMJO_all_all.loc[EMJO_all_all['E_Phase'] == x]
-    for y in np.arange(0, 9, 1):
-        MJO_ENSO_CN = ENSOs_CN.loc[ENSOs_CN['M_Phase'] == y]
-        hmap_all_all[x + 1, y] = len(MJO_ENSO_CN['Index'])
-hmap_all_all = hmap_all_all / hmap_main
-print(hmap_all_all)
-
-plt.imshow(hmap_all_all, cmap=plt.cm.Reds)
-plt.xlabel('MJO Phase')
-plt.ylabel('ENSO Phase')
-plt.title('Frequency of Oscillation Phase', fontsize=16)
-plt.xticks([0, 1, 2, 3, 4, 5, 6, 7, 8], ['None', 1, 2, 3, 4, 5, 6, 7, 8])
-plt.yticks([0, 1, 2], ['La Niña', 'Neutral', 'El Niño'])
-plt.colorbar(shrink=0.75, label='Frequency')
-plt.tight_layout()
-plt.savefig('Heatmap_all_all_Corr_{}_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-
-hmap_all_corr = np.zeros((3, 9))
-for x in np.arange(-1, 2, 1):
-    ENSOs_CN = EMJO_all_corr.loc[EMJO_all_corr['E_Phase'] == x]
-    for y in np.arange(0, 9, 1):
-        MJO_ENSO_CN = ENSOs_CN.loc[ENSOs_CN['M_Phase'] == y]
-        hmap_all_corr[x + 1, y] = len(MJO_ENSO_CN['Index'])
-hmap_all_corr = hmap_all_corr / hmap_main
-print(hmap_all_corr)
-
-plt.imshow(hmap_all_corr, cmap=plt.cm.Reds)
-plt.xlabel('MJO Phase')
-plt.ylabel('ENSO Phase')
-plt.title('Frequency of Oscillation Phase\n(Correctly Predicted Samples)', fontsize=16)
-plt.xticks([0, 1, 2, 3, 4, 5, 6, 7, 8], ['None', 1, 2, 3, 4, 5, 6, 7, 8])
-plt.yticks([0, 1, 2], ['La Niña', 'Neutral', 'El Niño'])
-plt.colorbar(shrink=0.75, label='Frequency')
-plt.tight_layout()
-plt.savefig('Heatmap_all_corr_Corr_{}_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-            dpi=300)
-plt.show()
-
-# %%
-# Utilize counter
-print(counter)
-for xyz in range(counter):
+# In case we wanted to run hmaps for indices that occurred x+ times for each grid point
+'''for xyz in range(counter):
 
     # flatten each grid point
     flat1 = np.concatenate(loc_arr[xyz]).ravel()
@@ -936,8 +766,9 @@ plt.yticks([0, 1, 2], ['La Niña', 'Neutral', 'El Niño'])
 plt.colorbar(shrink=0.75, label='Frequency')
 plt.tight_layout()
 plt.savefig('Heatmap3+_{}_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]), dpi=300)
-plt.show()
+plt.show()'''
 
+# Look at Index distributions
 '''# Use this for indexes and counts
 # flatten each grid point
 flat1 = np.concatenate(loc_arr[0]).ravel()
