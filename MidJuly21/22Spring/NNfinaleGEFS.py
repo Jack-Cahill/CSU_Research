@@ -1,4 +1,3 @@
-
 import geopandas as gp
 import tensorflow as tf
 import sys
