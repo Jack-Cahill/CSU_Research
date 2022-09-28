@@ -34,7 +34,7 @@ cmap = plt.get_cmap('cmr.redshift')  # MPL
 
 # Define a set of random seeds (or just one seed if you want to check)
 seeds = [92, 95, 100, 137, 141, 142]
-seeds = np.arange(88, 89, 1)
+#seeds = np.arange(88, 89, 1)
 
 # Define Input Map variable
 variable = 'olr'
