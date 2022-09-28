@@ -34,7 +34,6 @@ pd.options.mode.chained_assignment = None  # default='warn'
 cmap = cmr.redshift  # CMasher
 cmap = plt.get_cmap('cmr.redshift')  # MPL
 
-
 # If you want maps to include correct and incorrect top confidences uncomment CONLY
 
 # %% -------------------------------- INPUTS --------------------------------
@@ -105,7 +104,7 @@ DROPOUT = 0.3
 # OBS
 # Read in ALL obs using xarray and paramters
 ds_obs = xr.open_mfdataset('/Users/jcahill4/DATA/{}/Obs/{}/clima_{}.nc'.format(
-variable, cdata, variable), concat_dim='time', combine='nested')
+    variable, cdata, variable), concat_dim='time', combine='nested')
 ds_obs = ds_obs[variable].sel(lon=lon_slice, lat=lat_slice)
 
 # Specify lat and lon for input
@@ -131,7 +130,6 @@ ds_obs1_base = xr.open_dataset('/Users/jcahill4/DATA/{}/Obs/{}/clima_{}.nc'.form
 ds_UFS_base = xr.open_mfdataset('/Users/jcahill4/DATA/{}/UFS/{}/*.nc'.format(Pred, cdata), concat_dim='time',
                                 combine='nested')
 
-
 CONUS = ds_obs1_base['h500'].sel(lat=xlat_slice, lon=xlon_slice)
 CONUS_lats = CONUS.lat.values[::4]
 CONUS_lons = CONUS.lon.values[::4]
@@ -145,7 +143,7 @@ print(CONUS_lons)
 val_idx = np.arange(0, smlnum)
 obs_maps = ds['{} obs'.format(variable)][bignum:]
 date_list = ds['time'][bignum:]
-idx_date = pd.DataFrame({'idx': val_idx, 'dates': date_list, 'obs': obs_maps})
+idx_date = pd.DataFrame({'Index': val_idx, 'dates': date_list, 'obs': obs_maps})
 
 # Merge MJO and ENSO info
 mdata = pd.read_csv('/Users/jcahill4/Downloads/mjo_phase1.csv')
@@ -168,6 +166,13 @@ while i < len(mdata_ymd['Amp']):
     else:
         i = i + 1
 
+# Create new column for season
+mdata_ymd.loc[mdata_ymd['month'].between(5.9, 8.1), 'Season'] = 'Sum'
+mdata_ymd.loc[mdata_ymd['month'].between(8.9, 11.1), 'Season'] = 'Fall'
+mdata_ymd.loc[mdata_ymd['month'].between(11.9, 12.1), 'Season'] = 'Wint'
+mdata_ymd.loc[mdata_ymd['month'].between(0.9, 2.1), 'Season'] = 'Wint'
+mdata_ymd.loc[mdata_ymd['month'].between(2.9, 5.1), 'Season'] = 'Spr'
+
 # Drop Y-M-D
 mdata_ymd = mdata_ymd.drop(['year', 'month', 'day'], axis=1)
 
@@ -180,55 +185,6 @@ idx_all = pd.merge(idx_date, mdata_ymd, on='dates')
 # 1 all samples, 3 classes (predicted class), 3 classes (actual class), 4 all samples each season, 3*4 (class*season)
 acc_map_tot = 23
 Acc_Map_Data = np.empty((acc_map_tot, len(CONUS_lons), len(CONUS_lats)))
-
-'''# SET UP MAP
-xmap_full = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_full[:] = np.nan
-xmap_und = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_und[:] = np.nan
-xmap_acc = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_acc[:] = np.nan
-xmap_ovr = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_ovr[:] = np.nan
-xmap_und_a = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_und_a[:] = np.nan
-xmap_acc_a = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_acc_a[:] = np.nan
-xmap_fall_full = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_fall_full[:] = np.nan
-xmap_ovr_a = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_ovr_a[:] = np.nan
-xmap_sum_full = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_sum_full[:] = np.nan
-xmap_wint_full = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_wint_full[:] = np.nan
-xmap_spr_full = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_spr_full[:] = np.nan
-xmap_sum_und = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_sum_und[:] = np.nan
-xmap_fall_und = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_fall_und[:] = np.nan
-xmap_wint_und = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_wint_und[:] = np.nan
-xmap_spr_und = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_spr_und[:] = np.nan
-xmap_sum_acc = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_sum_acc[:] = np.nan
-xmap_fall_acc = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_fall_acc[:] = np.nan
-xmap_wint_acc = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_wint_acc[:] = np.nan
-xmap_spr_acc = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_spr_acc[:] = np.nan
-xmap_sum_ovr = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_sum_ovr[:] = np.nan
-xmap_fall_ovr = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_fall_ovr[:] = np.nan
-xmap_wint_ovr = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_wint_ovr[:] = np.nan
-xmap_spr_ovr = np.empty((len(CONUS_lons), len(CONUS_lats)))
-xmap_spr_ovr[:] = np.nan'''
-
 
 # # # # # # # # # #  REGIONS # # # # # # # # # #
 
@@ -269,7 +225,6 @@ SE = states[states['STUSPS'].isin(['FL', 'GA', 'AL', 'SC', 'NC', 'VA'])]
 SF_grid = pd.DataFrame({'longitude': ptlons, 'latitude': ptlats})
 gdf = gp.GeoDataFrame(SF_grid, geometry=gp.points_from_xy(SF_grid.longitude, SF_grid.latitude))
 
-
 # Plot region
 if Reg == 2:
     region = NW
@@ -285,7 +240,7 @@ plt.show()
 # put lat and lons into pandas df
 reg_lon_lat = pd.DataFrame({'longitude': US_pts.longitude, 'latitude': US_pts.latitude})
 
-# LOOP THROUGH MAP
+# %% # # # # # # # # #  RUN NEURAL NETWORK FOR EACH LOCATION AND SEED # # # # # # # # # #
 for c1, xxx in enumerate(CONUS_lons):
     for c2, xx in enumerate(CONUS_lats):
 
@@ -297,30 +252,7 @@ for c1, xxx in enumerate(CONUS_lons):
             counter = counter + 1
             print(xx, xxx)
 
-            # lists that restart for every location
-            '''acc_full = []0
-            acc_und = []1
-            acc_acc = []2
-            acc_ovr = []3
-            acc_und_a = []4
-            acc_acc_a = []5
-            acc_ovr_a = []6
-            acc_sum_full = []7
-            acc_fall_full = []8
-            acc_wint_full = []9
-            acc_spr_full = []10
-            acc_sum_und = []11
-            acc_fall_und = []12
-            acc_wint_und = []13
-            acc_spr_und = []14
-            acc_sum_acc = []15
-            acc_fall_acc = []16
-            acc_wint_acc = []17
-            acc_spr_acc = []18
-            acc_sum_ovr = []19
-            acc_fall_ovr = []20
-            acc_wint_ovr = []21
-            acc_spr_ovr = []22'''
+            # Create lists of lists (inner lists contain the average for each seed)(outer lists are for each cls / szn)
             acc_lists = [[] for _ in range(acc_map_tot)]
 
             # arrays for 4 adjacent grid points
@@ -351,7 +283,6 @@ for c1, xxx in enumerate(CONUS_lons):
                 ds_UFS = ds_UFS_base['{}'.format(Pred)].sel(lat=lat_sliceP, lon=lon_sliceP)
 
                 # # # DATA BEING READ IN AND MERGED CORRECTLY HAS BEEN TRIPLE CHECKED
-
                 if error == 0:
 
                     # PART1: WE START BY ONLY GRABBING A FEW UFS DATES AND ALL OBS. 
@@ -506,9 +437,8 @@ for c1, xxx in enumerate(CONUS_lons):
                 ALLy = np.array(ALLy)
                 ALLy = ALLy.astype(int)
 
-                ###### ALLx and ALLy  HAS BEEN TRIPLE CHECKED AND ITS CORRECT
-
-                # SPLITING UP DATA
+                # # # # # # ALLx and ALLy  HAS BEEN TRIPLE CHECKED AND ITS CORRECT
+                # SPLITTING UP DATA
 
                 if TTLoco == 0:
                     x_train = ALLx[:bignum]
@@ -554,7 +484,7 @@ for c1, xxx in enumerate(CONUS_lons):
                                                                    verbose=0)
                 callbacks = [es_callback]
 
-                model, loss_function = make_model()
+                model, loss_function = make_model(nodes, x_train_shp, RIDGE1, DROPOUT, NP_SEED, LR, y_train)
 
                 # y_train one-hot labels
                 enc = preprocessing.OneHotEncoder()
@@ -639,304 +569,93 @@ for c1, xxx in enumerate(CONUS_lons):
                 CP_Corr_R = np.array(CP_Corr_R)
                 CP_Corr_R = np.mean(CP_Corr_R.reshape(-1, 9), axis=1)
 
-                ###### Cluster maps
-
-                # x-Vals aren't shuffled so dates will match
-
-                # Add data to array only if the run is "good" (goes over 40% acc, never under 20% acc for 50% most confident runs)
+                # Add data to array only if the run is "good" (over 40% acc, never under 20% acc for 50% most conf runs)
                 # if np.min(CP_Corr_R[-6:]) > 20.0 and np.max(CP_Corr_R) > 40.0:
-                if np.min(CP_Corr_R[-6:]) > 0.0 and np.max(CP_Corr_R) > 0.0:
-                    Bmaps20 = Bmaps[int(len(Bmaps) * 0.80):]  # top 20%
-                    WinClass20 = WinClass[int(len(WinClass) * 0.8):]  # .8 because we're grabbing the top 20% data
-                    CorrOrNo20 = CorrOrNo[int(len(CorrOrNo) * 0.8):]
-                    ActClass20 = ActClass[int(len(ActClass) * 0.8):]
+                if np.min(CP_Corr_R[-6:]) > 0.0 and np.max(CP_Corr_R) > 0.0:  # This just mean grab all files
+                    Bmaps20 = Bmaps[int(len(Bmaps) * 0.80):]  # top 20% idx's - .8 <-> top 20% data
+                    WinClass20 = WinClass[int(len(WinClass) * 0.8):]  # Predicted class
+                    ActClass20 = ActClass[int(len(ActClass) * 0.8):]  # Actual Class
+                    CorrOrNo20 = CorrOrNo[int(len(CorrOrNo) * 0.8):]  # Correct (1) or not (0) ?
 
-                    # indices for now
+                    # list for heatmaps
                     locos += [Bmaps20]
                     locosCN += [CorrOrNo20]
                     locosCLS += [WinClass20]
 
-                    # Seasonal indices
-                    sIndex1 = np.arange(0, 8)
-                    sIndex2 = np.arange(47, 60)
-                    sIndex3 = np.arange(99, 112)
-                    sIndex4 = np.arange(151, 164)
-                    sIndex = np.concatenate((sIndex1, sIndex2, sIndex3, sIndex4), axis=None)
-                    sum_pd = pd.DataFrame({'Index': sIndex})
+                    # Create pd arrays based on season
+                    sum_pd = idx_all[idx_all["Season"] == 'Sum']
+                    fall_pd = idx_all[idx_all["Season"] == 'Fall']
+                    wint_pd = idx_all[idx_all["Season"] == 'Wint']
+                    spr_pd = idx_all[idx_all["Season"] == 'Spr']
 
-                    fIndex1 = np.arange(8, 21)
-                    fIndex2 = np.arange(60, 73)
-                    fIndex3 = np.arange(122, 125)
-                    fIndex4 = np.arange(164, 774)
-                    fIndex = np.concatenate((fIndex1, fIndex2, fIndex3, fIndex4), axis=None)
-                    fall_pd = pd.DataFrame({'Index': fIndex})
+                    # Create list of seasonal pd arrays
+                    X_pd = [sum_pd, fall_pd, wint_pd, spr_pd]
 
-                    wIndex1 = np.arange(21, 33)
-                    wIndex2 = np.arange(73, 86)
-                    wIndex3 = np.arange(125, 138)
-                    wIndex4 = np.arange(177, 180)
-                    wIndex = np.concatenate((wIndex1, wIndex2, wIndex3, wIndex4), axis=None)
-                    wint_pd = pd.DataFrame({'Index': wIndex})
+                    # Base pandas array for calculating accuracies
+                    CorrCount_pd = pd.DataFrame({'Corr?': CorrOrNo20, 'WinClass': WinClass20, 'ActClass': ActClass20,
+                                                 'Index': Bmaps20})
 
-                    spIndex1 = np.arange(33, 47)
-                    spIndex2 = np.arange(86, 99)
-                    spIndex3 = np.arange(138, 151)
-                    spIndex = np.concatenate((spIndex1, spIndex2, spIndex3), axis=None)
-                    spr_pd = pd.DataFrame({'Index': spIndex})
-
-                    # ACC map based on class and predicted class
-                    CorrCount_pd = pd.DataFrame({'Corr?': CorrOrNo20, 'WinClass': WinClass20, 'Index': Bmaps20})
-
-                    # ACC MAP: get accuracy of top 20% most confident samples and put them in a list
+                    # # # # # # # # # # # ACCURACY MAP - ALL SAMPLES # # # # # # # # # #
                     CorrCount = np.count_nonzero(CorrOrNo20 == 1)
                     acc_lists[0] += [CorrCount / len(CorrOrNo20)]
 
-                    CorrCount0_pd = CorrCount_pd[CorrCount_pd["WinClass"] == 0]
-                    CorrCount0_list = CorrCount0_pd.iloc[:, 0]
-                    CorrCount0 = np.count_nonzero(CorrCount0_list == 1)
-                    if len(CorrCount0_list) == 0:
-                        acc_lists[1] += [np.nan]
-                    else:
-                        acc_lists[1] += [CorrCount0 / len(CorrCount0_list)]
+                    # Calculate Accuracy for each Season
+                    for ij in range(4):  # 4 seasons
 
-                    CorrCount1_pd = CorrCount_pd[CorrCount_pd["WinClass"] == 1]
-                    CorrCount1_list = CorrCount1_pd.iloc[:, 0]
-                    CorrCount1 = np.count_nonzero(CorrCount1_list == 1)
-                    if len(CorrCount1_list) == 0:
-                        acc_lists[2] += [np.nan]
-                    else:
-                        acc_lists[2] += [CorrCount1 / len(CorrCount1_list)]
+                        # Get specific season
+                        szn_pd = pd.merge(X_pd[ij], CorrCount_pd, on='Index')
 
-                    CorrCount2_pd = CorrCount_pd[CorrCount_pd["WinClass"] == 2]
-                    CorrCount2_list = CorrCount2_pd.iloc[:, 0]
-                    CorrCount2 = np.count_nonzero(CorrCount2_list == 1)
-                    if len(CorrCount2_list) == 0:
-                        acc_lists[3] += [np.nan]
-                    else:
-                        acc_lists[3] += [CorrCount2 / len(CorrCount2_list)]
-
-                    # Seasonal groups
-                    s_pd = pd.merge(sum_pd, CorrCount_pd, on='Index')
-                    f_pd = pd.merge(fall_pd, CorrCount_pd, on='Index')
-                    w_pd = pd.merge(wint_pd, CorrCount_pd, on='Index')
-                    sp_pd = pd.merge(spr_pd, CorrCount_pd, on='Index')
-
-                    s_u_pd = pd.merge(sum_pd, CorrCount0_pd, on='Index')
-                    f_u_pd = pd.merge(fall_pd, CorrCount0_pd, on='Index')
-                    w_u_pd = pd.merge(wint_pd, CorrCount0_pd, on='Index')
-                    sp_u_pd = pd.merge(spr_pd, CorrCount0_pd, on='Index')
-
-                    s_a_pd = pd.merge(sum_pd, CorrCount1_pd, on='Index')
-                    f_a_pd = pd.merge(fall_pd, CorrCount1_pd, on='Index')
-                    w_a_pd = pd.merge(wint_pd, CorrCount1_pd, on='Index')
-                    sp_a_pd = pd.merge(spr_pd, CorrCount1_pd, on='Index')
-
-                    s_o_pd = pd.merge(sum_pd, CorrCount2_pd, on='Index')
-                    f_o_pd = pd.merge(fall_pd, CorrCount2_pd, on='Index')
-                    w_o_pd = pd.merge(wint_pd, CorrCount2_pd, on='Index')
-                    sp_o_pd = pd.merge(spr_pd, CorrCount2_pd, on='Index')
-
-                    # summer
-                    if 1 in s_pd['Corr?'].values:
-                        CorrCountSum = s_pd['Corr?'].value_counts()[1]
-                        if len(s_pd['Index']) == 0:
-                            acc_lists[7] += [np.nan]
+                        # accuracy calculation
+                        if 1 in szn_pd['Corr?'].values:  # Check if there's any correct values for this szn / class
+                            CorrCountsumX = szn_pd['Corr?'].value_counts()[1]
+                            acc_lists[7 + ij] += [CorrCountsumX / len(szn_pd['Index'])]
                         else:
-                            acc_lists[7] += [CorrCountSum / len(s_pd['Index'])]
-                    else:
-                        acc_lists[7] += [np.nan]
+                            acc_lists[7 + ij] += [np.nan]
 
-                    if 1 in s_u_pd['Corr?'].values:
-                        CorrCountSumu = s_u_pd['Corr?'].value_counts()[1]
-                        if len(s_u_pd['Index']) == 0:
-                            acc_lists[11] += [np.nan]
+                    # # # # # # # # # # # ACCURACY MAP - BY CLASS # # # # # # # # # #
+                    for iii in range(Classes):
+
+                        # Get specific class
+                        CorrCountX_pd = CorrCount_pd[CorrCount_pd["WinClass"] == iii]
+                        print(CorrCountX_pd)
+
+                        # Correct samples only (for calculating accuracy)
+                        CorrCountX_list = CorrCountX_pd.iloc[:, 0]
+                        CorrCountX = np.count_nonzero(CorrCountX_list == 1)
+
+                        # Calculate Accuracy for Predicted Class
+                        if len(CorrCountX_list) == 0:
+                            acc_lists[iii+1] += [np.nan]
                         else:
-                            acc_lists[11] += [CorrCountSumu / len(s_u_pd['Index'])]
-                    else:
-                        acc_lists[11] += [np.nan]
+                            acc_lists[iii+1] += [CorrCountX / len(CorrCountX_list)]
 
-                    if 1 in s_a_pd['Corr?'].values:
-                        CorrCountSuma = s_a_pd['Corr?'].value_counts()[1]
-                        if len(s_a_pd['Index']) == 0:
-                            acc_lists[15] += [np.nan]
+                        # Calculate Accuracy for Actual Class
+                        CorrCountX_pd_a = CorrCount_pd[CorrCount_pd["ActClass"] == iii]
+                        CorrCountX_list_a = CorrCountX_pd_a.iloc[:, 0]
+                        CorrCountX_a = np.count_nonzero(CorrCountX_list_a == 1)
+                        if len(CorrCountX_list_a) == 0:
+                            acc_lists[iii + 4] += [np.nan]
                         else:
-                            acc_lists[15] += [CorrCountSuma / len(s_a_pd['Index'])]
-                    else:
-                        acc_lists[15] += [np.nan]
+                            acc_lists[iii + 4] += [CorrCountX_a / len(CorrCountX_list_a)]
 
-                    if 1 in s_o_pd['Corr?'].values:
-                        CorrCountSumo = s_o_pd['Corr?'].value_counts()[1]
-                        if len(s_o_pd['Index']) == 0:
-                            acc_lists[19] += [np.nan]
-                        else:
-                            acc_lists[19] += [CorrCountSumo / len(s_o_pd['Index'])]
-                    else:
-                        acc_lists[19] += [np.nan]
+                        # Calculate Accuracy for each Season
+                        for ii in range(4):  # 4 seasons
 
-                    # fall
-                    if 1 in f_pd['Corr?'].values:
-                        CorrCountFall = f_pd['Corr?'].value_counts()[1]
-                        if len(f_pd['Index']) == 0:
-                            acc_lists[8] += [np.nan]
-                        else:
-                            acc_lists[8] += [CorrCountFall / len(f_pd['Index'])]
-                    else:
-                        acc_lists[8] += [np.nan]
+                            # Get specific season
+                            szn_pd = pd.merge(X_pd[ii], CorrCountX_pd, on='Index')
 
-                    if 1 in f_u_pd['Corr?'].values:
-                        CorrCountFallu = f_u_pd['Corr?'].value_counts()[1]
-                        if len(f_u_pd['Index']) == 0:
-                            acc_lists[12] += [np.nan]
-                        else:
-                            acc_lists[12] += [CorrCountFallu / len(f_u_pd['Index'])]
-                    else:
-                        acc_lists[12] += [np.nan]
+                            # Accuracy calculation
+                            if 1 in szn_pd['Corr?'].values:  # Check if there's any correct values for this szn / class
+                                CorrCountsumX = szn_pd['Corr?'].value_counts()[1]
+                                acc_lists[11 + iii*4 + ii] += [CorrCountsumX / len(szn_pd['Index'])]
+                            else:
+                                acc_lists[11 + iii*4 + ii] += [np.nan]
 
-                    if 1 in f_a_pd['Corr?'].values:
-                        CorrCountFalla = f_a_pd['Corr?'].value_counts()[1]
-                        if len(f_a_pd['Index']) == 0:
-                            acc_lists[16] += [np.nan]
-                        else:
-                            acc_lists[16] += [CorrCountFalla / len(f_a_pd['Index'])]
-                    else:
-                        acc_lists[16] += [np.nan]
-
-                    if 1 in f_o_pd['Corr?'].values:
-                        CorrCountFallo = f_o_pd['Corr?'].value_counts()[1]
-                        if len(f_o_pd['Index']) == 0:
-                            acc_lists[20] += [np.nan]
-                        else:
-                            acc_lists[20] += [CorrCountFallo / len(f_o_pd['Index'])]
-                    else:
-                        acc_lists[20] += [np.nan]
-
-                    # winter
-                    if 1 in w_pd['Corr?'].values:
-                        CorrCountWint = w_pd['Corr?'].value_counts()[1]
-                        if len(w_pd['Index']) == 0:
-                            acc_lists[9] += [np.nan]
-                        else:
-                            acc_lists[9] += [CorrCountWint / len(w_pd['Index'])]
-                    else:
-                        acc_lists[9] += [np.nan]
-
-                    if 1 in w_u_pd['Corr?'].values:
-                        CorrCountWintu = w_u_pd['Corr?'].value_counts()[1]
-                        if len(w_u_pd['Index']) == 0:
-                            acc_lists[13] += [np.nan]
-                        else:
-                            acc_lists[13] += [CorrCountWintu / len(w_u_pd['Index'])]
-                    else:
-                        acc_lists[13] += [np.nan]
-
-                    if 1 in w_a_pd['Corr?'].values:
-                        CorrCountWinta = w_a_pd['Corr?'].value_counts()[1]
-                        if len(w_a_pd['Index']) == 0:
-                            acc_lists[17] += [np.nan]
-                        else:
-                            acc_lists[17] += [CorrCountWinta / len(w_a_pd['Index'])]
-                    else:
-                        acc_lists[17] += [np.nan]
-
-                    if 1 in w_o_pd['Corr?'].values:
-                        CorrCountWinto = w_o_pd['Corr?'].value_counts()[1]
-                        if len(w_o_pd['Index']) == 0:
-                            acc_lists[21] += [np.nan]
-                        else:
-                            acc_lists[21] += [CorrCountWinto / len(w_o_pd['Index'])]
-                    else:
-                        acc_lists[21] += [np.nan]
-
-                    # spring
-                    if 1 in sp_pd['Corr?'].values:
-                        CorrCountSpr = sp_pd['Corr?'].value_counts()[1]
-                        if len(sp_pd['Index']) == 0:
-                            acc_lists[10] += [np.nan]
-                        else:
-                            acc_lists[10] += [CorrCountSpr / len(sp_pd['Index'])]
-                    else:
-                        acc_lists[10] += [np.nan]
-
-                    if 1 in sp_u_pd['Corr?'].values:
-                        CorrCountSpru = sp_u_pd['Corr?'].value_counts()[1]
-                        if len(sp_u_pd['Index']) == 0:
-                            acc_lists[14] += [np.nan]
-                        else:
-                            acc_lists[14] += [CorrCountSpru / len(sp_u_pd['Index'])]
-                    else:
-                        acc_lists[14] += [np.nan]
-
-                    if 1 in sp_a_pd['Corr?'].values:
-                        CorrCountSpra = sp_a_pd['Corr?'].value_counts()[1]
-                        if len(sp_a_pd['Index']) == 0:
-                            acc_lists[18] += [np.nan]
-                        else:
-                            acc_lists[18] += [CorrCountSpra / len(sp_a_pd['Index'])]
-                    else:
-                        acc_lists[18] += [np.nan]
-
-                    if 1 in sp_o_pd['Corr?'].values:
-                        CorrCountSpro = sp_o_pd['Corr?'].value_counts()[1]
-                        if len(sp_o_pd['Index']) == 0:
-                            acc_lists[22] += [np.nan]
-                        else:
-                            acc_lists[22] += [CorrCountSpro / len(sp_o_pd['Index'])]
-                    else:
-                        acc_lists[22] += [np.nan]
-
-                    # Repeat process, but instead of Predicted Class (WinClass), grab True Class 
-                    CorrCount_pd_a = pd.DataFrame({'Corr?': CorrOrNo20, 'ActClass': ActClass20})
-
-                    CorrCount0_pd_a = CorrCount_pd_a[CorrCount_pd_a["ActClass"] == 0]
-                    CorrCount0_list_a = CorrCount0_pd_a.iloc[:, 0]
-                    CorrCount0_a = np.count_nonzero(CorrCount0_list_a == 1)
-                    if len(CorrCount0_list_a) == 0:
-                        acc_lists[4] += [np.nan]
-                    else:
-                        acc_lists[4] += [CorrCount0_a / len(CorrCount0_list_a)]
-
-                    CorrCount1_pd_a = CorrCount_pd_a[CorrCount_pd_a["ActClass"] == 1]
-                    CorrCount1_list_a = CorrCount1_pd_a.iloc[:, 0]
-                    CorrCount1_a = np.count_nonzero(CorrCount1_list_a == 1)
-                    if len(CorrCount1_list_a) == 0:
-                        acc_lists[5] += [np.nan]
-                    else:
-                        acc_lists[5] += [CorrCount1_a / len(CorrCount1_list_a)]
-
-                    CorrCount2_pd_a = CorrCount_pd_a[CorrCount_pd_a["ActClass"] == 2]
-                    CorrCount2_list_a = CorrCount2_pd_a.iloc[:, 0]
-                    CorrCount2_a = np.count_nonzero(CorrCount2_list_a == 1)
-                    if len(CorrCount2_list_a) == 0:
-                        acc_lists[6] += [np.nan]
-                    else:
-                        acc_lists[6] += [CorrCount2_a / len(CorrCount2_list_a)]
-
+                # If we are throwing out certain seeds, this counts how many we throw out
                 else:
                     Trash = Trash + 1
 
-            '''xmap_full[c1][c2] = np.nanmean(acc_full)
-            xmap_acc[c1][c2] = np.nanmean(acc_acc)
-            xmap_und[c1][c2] = np.nanmean(acc_und)
-            xmap_ovr[c1][c2] = np.nanmean(acc_ovr)
-            xmap_acc_a[c1][c2] = np.nanmean(acc_acc_a)
-            xmap_und_a[c1][c2] = np.nanmean(acc_und_a)
-            xmap_ovr_a[c1][c2] = np.nanmean(acc_ovr_a)
-            xmap_sum_full[c1][c2] = np.nanmean(acc_sum_full)
-            xmap_fall_full[c1][c2] = np.nanmean(acc_fall_full)
-            xmap_wint_full[c1][c2] = np.nanmean(acc_wint_full)
-            xmap_spr_full[c1][c2] = np.nanmean(acc_spr_full)
-            xmap_sum_und[c1][c2] = np.nanmean(acc_sum_und)
-            xmap_fall_und[c1][c2] = np.nanmean(acc_fall_und)
-            xmap_wint_und[c1][c2] = np.nanmean(acc_wint_und)
-            xmap_spr_und[c1][c2] = np.nanmean(acc_spr_und)
-            xmap_sum_acc[c1][c2] = np.nanmean(acc_sum_acc)
-            xmap_fall_acc[c1][c2] = np.nanmean(acc_fall_acc)
-            xmap_wint_acc[c1][c2] = np.nanmean(acc_wint_acc)
-            xmap_spr_acc[c1][c2] = np.nanmean(acc_spr_acc)
-            xmap_sum_ovr[c1][c2] = np.nanmean(acc_sum_ovr)
-            xmap_fall_ovr[c1][c2] = np.nanmean(acc_fall_ovr)
-            xmap_wint_ovr[c1][c2] = np.nanmean(acc_wint_ovr)
-            xmap_spr_ovr[c1][c2] = np.nanmean(acc_spr_ovr)'''
+            # Average each season / class over all the seeds
             for abc in range(acc_map_tot):
                 Acc_Map_Data[abc][c1][c2] = np.nanmean(acc_lists[abc])
 
@@ -945,12 +664,6 @@ for c1, xxx in enumerate(CONUS_lons):
                 loc_arrCN += [locosCN]
                 loc_arrCLS += [locosCLS]
 print('DONE')
-# %%
-'''print(np.amax(xmap_full))
-print(np.amin(xmap_full))
-print(np.average(xmap_full))'''
-print(Acc_Map_Data[0])
-
 
 # %%
 def savitzky_golay(y, window_size, order, deriv=0, rate=1):
@@ -989,7 +702,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs = idx_all.loc[idx_all['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
-        hmap_main[x + 1, y] = len(MJO_ENSO['idx'])
+        hmap_main[x + 1, y] = len(MJO_ENSO['Index'])
 print(hmap_main)
 
 for xy in range(counter):
@@ -1008,16 +721,16 @@ for xy in range(counter):
         flat_CLS_all = np.concatenate([flat_CLS_all, flat_CLS])
 
 # Separate based on class and correct samples
-info_all_all = pd.DataFrame({'idx': flat_idx_all, 'CorrOrNo': flat_CNO_all, 'Class': flat_CLS_all})
+info_all_all = pd.DataFrame({'Index': flat_idx_all, 'CorrOrNo': flat_CNO_all, 'Class': flat_CLS_all})
 info_all_corr = info_all_all[info_all_all['CorrOrNo'] == 1].reset_index(drop=True)
 info_class_all = info_all_all[info_all_all['Class'] == class_num].reset_index(drop=True)
 info_class_corr = info_class_all[info_class_all['CorrOrNo'] == 1].reset_index(drop=True)
 
 # Count indices
-info_all_all_count = info_all_all.groupby(['idx'])['idx'].count()
-info_all_corr_count = info_all_corr.groupby(['idx'])['idx'].count()
-info_class_all_count = info_class_all.groupby(['idx'])['idx'].count()
-info_class_corr_count = info_class_corr.groupby(['idx'])['idx'].count()
+info_all_all_count = info_all_all.groupby(['Index'])['Index'].count()
+info_all_corr_count = info_all_corr.groupby(['Index'])['Index'].count()
+info_class_all_count = info_class_all.groupby(['Index'])['Index'].count()
+info_class_corr_count = info_class_corr.groupby(['Index'])['Index'].count()
 
 info_all_all_count_df = info_all_all_count.to_frame()
 info_all_corr_count_df = info_all_corr_count.to_frame()
@@ -1029,22 +742,22 @@ info_all_corr_idx = info_all_corr_count_df.index
 info_class_all_idx = info_class_all_count_df.index
 info_class_corr_idx = info_class_corr_count_df.index
 
-info_all_all_count = info_all_all_count_df['idx'].reset_index(drop=True)  # Count
-info_all_corr_count = info_all_corr_count_df['idx'].reset_index(drop=True)
-info_class_all_count = info_class_all_count_df['idx'].reset_index(drop=True)
-info_class_corr_count = info_class_corr_count_df['idx'].reset_index(drop=True)
+info_all_all_count = info_all_all_count_df['Index'].reset_index(drop=True)  # Count
+info_all_corr_count = info_all_corr_count_df['Index'].reset_index(drop=True)
+info_class_all_count = info_class_all_count_df['Index'].reset_index(drop=True)
+info_class_corr_count = info_class_corr_count_df['Index'].reset_index(drop=True)
 
 # Convert index and counts into pandas array
-countpd_all_all = pd.DataFrame({'idx': info_all_all_idx, 'count': info_all_all_count})
-countpd_all_corr = pd.DataFrame({'idx': info_all_corr_idx, 'count': info_all_corr_count})
-countpd_class_all = pd.DataFrame({'idx': info_class_all_idx, 'count': info_class_all_count})
-countpd_class_corr = pd.DataFrame({'idx': info_class_corr_idx, 'count': info_class_corr_count})
+countpd_all_all = pd.DataFrame({'Index': info_all_all_idx, 'count': info_all_all_count})
+countpd_all_corr = pd.DataFrame({'Index': info_all_corr_idx, 'count': info_all_corr_count})
+countpd_class_all = pd.DataFrame({'Index': info_class_all_idx, 'count': info_class_all_count})
+countpd_class_corr = pd.DataFrame({'Index': info_class_corr_idx, 'count': info_class_corr_count})
 
 # merge with ENSO and MJO info
-EMJO_all_all = pd.merge(countpd_all_all, idx_all, on='idx')
-EMJO_all_corr = pd.merge(countpd_all_corr, idx_all, on='idx')
-EMJO_class_all = pd.merge(countpd_class_all, idx_all, on='idx')
-EMJO_class_corr = pd.merge(countpd_class_corr, idx_all, on='idx')
+EMJO_all_all = pd.merge(countpd_all_all, idx_all, on='Index')
+EMJO_all_corr = pd.merge(countpd_all_corr, idx_all, on='Index')
+EMJO_class_all = pd.merge(countpd_class_all, idx_all, on='Index')
+EMJO_class_corr = pd.merge(countpd_class_corr, idx_all, on='Index')
 
 # Make relevant hmaps
 # Create heat map to show frequency of MJO and ENSO phases
@@ -1053,7 +766,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs = EMJO_class_all.loc[EMJO_class_all['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
-        hmap[x + 1, y] = len(MJO_ENSO['idx'])
+        hmap[x + 1, y] = len(MJO_ENSO['Index'])
 hmap = hmap / hmap_main
 print(hmap)
 
@@ -1075,7 +788,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs_CN = EMJO_class_corr.loc[EMJO_class_corr['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO_CN = ENSOs_CN.loc[ENSOs_CN['M_Phase'] == y]
-        hmapCN[x + 1, y] = len(MJO_ENSO_CN['idx'])
+        hmapCN[x + 1, y] = len(MJO_ENSO_CN['Index'])
 hmapCN = hmapCN / hmap_main
 print(hmapCN)
 
@@ -1097,7 +810,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs_CN = EMJO_all_all.loc[EMJO_all_all['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO_CN = ENSOs_CN.loc[ENSOs_CN['M_Phase'] == y]
-        hmap_all_all[x + 1, y] = len(MJO_ENSO_CN['idx'])
+        hmap_all_all[x + 1, y] = len(MJO_ENSO_CN['Index'])
 hmap_all_all = hmap_all_all / hmap_main
 print(hmap_all_all)
 
@@ -1118,7 +831,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs_CN = EMJO_all_corr.loc[EMJO_all_corr['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO_CN = ENSOs_CN.loc[ENSOs_CN['M_Phase'] == y]
-        hmap_all_corr[x + 1, y] = len(MJO_ENSO_CN['idx'])
+        hmap_all_corr[x + 1, y] = len(MJO_ENSO_CN['Index'])
 hmap_all_corr = hmap_all_corr / hmap_main
 print(hmap_all_corr)
 
@@ -1147,7 +860,7 @@ for xyz in range(counter):
     count1 = np.column_stack((idx1, cun1))
 
     # Convert index vs count into panda arrays
-    count1pd = pd.DataFrame({'idx': idx1, 'count1': cun1})
+    count1pd = pd.DataFrame({'Index': idx1, 'count1': cun1})
 
     # Only look at indices that occurred 3 or more times in all grids
     over3p_1 = count1pd.drop(count1pd[(count1pd['count1'] < 2.5)].index)
@@ -1156,10 +869,10 @@ for xyz in range(counter):
     if xyz == 0:
         countmerg1 = over3p_1  # if doing 3+ switch count1pd with over3p_1 - this line and one below it
     else:  # if not doing 3+ switch over3p_1 with count1pd
-        countmerg1 = pd.merge(countmerg1, over3p_1, on='idx')
+        countmerg1 = pd.merge(countmerg1, over3p_1, on='Index')
 
 # Merge with the main index df and drop count columns
-common_idx = pd.merge(countmerg1, idx_all, on='idx')
+common_idx = pd.merge(countmerg1, idx_all, on='Index')
 
 # Create heat map to show frequency of MJO and ENSO phases
 hmap3p = np.zeros((3, 9))
@@ -1167,7 +880,7 @@ for x in np.arange(-1, 2, 1):
     ENSOs = common_idx.loc[common_idx['E_Phase'] == x]
     for y in np.arange(0, 9, 1):
         MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
-        hmap3p[x + 1, y] = len(MJO_ENSO['idx'])
+        hmap3p[x + 1, y] = len(MJO_ENSO['Index'])
 hmap3p = hmap3p / hmap_main
 print(hmap3p)
 
@@ -1319,7 +1032,7 @@ ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
 ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
 ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
 
-# plo
+# plot
 cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[1].T, vmin=vmin, vmax=vmax, norm=vmid,
                cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
@@ -1350,7 +1063,7 @@ ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
 ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
 
 # plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_acc.T, vmin=vmin, vmax=vmax, norm=vmid,
+cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[2].T, vmin=vmin, vmax=vmax, norm=vmid,
                cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
 
@@ -1381,7 +1094,7 @@ ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
 ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
 
 # plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_ovr.T, vmin=vmin, vmax=vmax, norm=vmid,
+cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[3].T, vmin=vmin, vmax=vmax, norm=vmid,
                cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
 
@@ -1417,7 +1130,7 @@ ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
 ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
 
 # plo
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_und_a.T, vmin=vmin, vmax=vmax, norm=vmid,
+cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[4].T, vmin=vmin, vmax=vmax, norm=vmid,
                cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
 
@@ -1447,7 +1160,7 @@ ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
 ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
 
 # plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_acc_a.T, vmin=vmin, vmax=vmax, norm=vmid,
+cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[5].T, vmin=vmin, vmax=vmax, norm=vmid,
                cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
 
@@ -1478,7 +1191,7 @@ ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
 ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
 
 # plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_ovr_a.T, vmin=vmin, vmax=vmax, norm=vmid,
+cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[6].T, vmin=vmin, vmax=vmax, norm=vmid,
                cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
 
@@ -1487,24 +1200,6 @@ plt.tight_layout()
 plt.savefig('AccMap_{}_ovr_TrueClass_Lt{}{}N{}Lr{}'.format(Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
             dpi=300)
 plt.show()
-# %%
-
-'''xmap_sum_full[np.isnan(xmap_sum_full)] = 0
-xmap_fall_full[np.isnan(xmap_fall_full)] = 0
-xmap_wint_full[np.isnan(xmap_wint_full)] = 0
-xmap_spr_full[np.isnan(xmap_spr_full)] = 0
-xmap_sum_ovr[np.isnan(xmap_sum_ovr)] = 0
-xmap_fall_ovr[np.isnan(xmap_fall_ovr)] = 0
-xmap_wint_ovr[np.isnan(xmap_wint_ovr)] = 0
-xmap_spr_ovr[np.isnan(xmap_spr_ovr)] = 0
-xmap_sum_und[np.isnan(xmap_sum_und)] = 0
-xmap_fall_und[np.isnan(xmap_fall_und)] = 0
-xmap_wint_und[np.isnan(xmap_wint_und)] = 0
-xmap_spr_und[np.isnan(xmap_spr_und)] = 0
-xmap_sum_acc[np.isnan(xmap_sum_acc)] = 0
-xmap_fall_acc[np.isnan(xmap_fall_acc)] = 0
-xmap_wint_acc[np.isnan(xmap_wint_acc)] = 0
-xmap_spr_acc[np.isnan(xmap_spr_acc)] = 0'''
 
 # %% Summer
 
@@ -1532,7 +1227,7 @@ ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
 ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
 
 # plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_sum_full.T, vmin=vmin, vmax=vmax, norm=vmid,
+cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[7].T, vmin=vmin, vmax=vmax, norm=vmid,
                cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
 
@@ -1568,7 +1263,7 @@ ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
 ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
 
 # plo
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_sum_und.T, vmin=vmin, vmax=vmax, norm=vmid,
+cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[11].T, vmin=vmin, vmax=vmax, norm=vmid,
                cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
 
@@ -1599,7 +1294,7 @@ ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
 ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
 
 # plot
-cf = ax.pcolor(lons_p - 180, lats_p, xmap_sum_acc.T, vmin=vmin, vmax=vmax, norm=vmid,
+cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[15].T, vmin=vmin, vmax=vmax, norm=vmid,
                cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
 cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
 
