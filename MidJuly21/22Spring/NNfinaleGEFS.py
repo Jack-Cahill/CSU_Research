@@ -138,7 +138,7 @@ CONUS_lons = CONUS_lons[:len(CONUS_lons) - 1]
 print(CONUS_lats)
 print(CONUS_lons)
 
-# # # # # # # # # #  MJO + ENSO COMPARISON SET-UP # # # # # # # # # #
+'''# # # # # # # # # #  MJO + ENSO COMPARISON SET-UP # # # # # # # # # #
 
 # Create a pandas arrays that has index, dates, and obs maps of validation data
 val_idx = np.arange(0, smlnum)
@@ -239,7 +239,7 @@ US_pts.plot(ax=us_boundary_map, color='pink')
 plt.show()
 
 # put lat and lons into pandas df
-reg_lon_lat = pd.DataFrame({'longitude': US_pts.longitude, 'latitude': US_pts.latitude})
+reg_lon_lat = pd.DataFrame({'longitude': US_pts.longitude, 'latitude': US_pts.latitude})'''
 
 # %% # # # # # # # # #  RUN NEURAL NETWORK FOR EACH LOCATION AND SEED # # # # # # # # # #
 for c1, xxx in enumerate(CONUS_lons):
@@ -468,7 +468,7 @@ for c1, xxx in enumerate(CONUS_lons):
                 CP_Corr_R = np.array(CP_Corr_R)
                 CP_Corr_R = np.mean(CP_Corr_R.reshape(-1, 9), axis=1)
 
-                # Add data to array only if the run is "good" (over 40% acc, never under 20% acc for 50% most conf runs)
+                '''# Add data to array only if the run is "good" (over 40% acc, never under 20% acc for 50% most conf runs)
                 # if np.min(CP_Corr_R[-6:]) > 20.0 and np.max(CP_Corr_R) > 40.0:
                 if np.min(CP_Corr_R[-6:]) > 0.0 and np.max(CP_Corr_R) > 0.0:  # This just mean grab all files
                     Bmaps20 = Bmaps[int(len(Bmaps) * 0.80):]  # top 20% idx's - .8 <-> top 20% data
@@ -717,7 +717,7 @@ for inf in range(len(info_list)):
     plt.savefig(
         'Heatmap_{}_{}_Lt{}{}N{}Lr{}'.format(out_names[inf], Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
         dpi=300)
-    plt.show()
+    plt.show()'''
 
 # %% # # # # # # # # #  EXTRA STUFF # # # # # # # # # #
 
