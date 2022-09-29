@@ -633,8 +633,8 @@ for acm in range(Acc_Map_Data.shape[0]):
                                                                                                  Cls_Name[clss]),
               fontsize=fsize)
     plt.tight_layout()
-    plt.savefig('AccMap_{}_Se{}Cls{}Pr{}Lt{}{}N{}Lr{}'.format(Pred, seas, clss, Pr, lead_time1, lead_time2, nodes,
-                                                              str(LR).split('.')[1]), dpi=300)
+    plt.savefig('AccMap_{}_Re{}Se{}Cls{}Pr{}Lt{}{}N{}Lr{}'.format(Pred, Reg, seas, clss, Pr, lead_time1, lead_time2,
+                                                                   nodes, str(LR).split('.')[1]), dpi=300)
     plt.show()
 
 
@@ -715,8 +715,8 @@ for inf in range(len(info_list)):
     plt.colorbar(shrink=0.75, label='Frequency')
     plt.tight_layout()
     plt.savefig(
-        'Heatmap_{}_{}_Lt{}{}N{}Lr{}'.format(out_names[inf], Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-        dpi=300)
+        'Heatmap_{}_{}_Re{}_Lt{}{}N{}Lr{}'.format(out_names[inf], Pred, Reg, lead_time1, lead_time2, nodes,
+                                                  str(LR).split('.')[1]), dpi=300)
     plt.show()
 
 # %% # # # # # # # # #  EXTRA STUFF # # # # # # # # # #
