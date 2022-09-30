@@ -28,8 +28,6 @@ pd.options.mode.chained_assignment = None  # default='warn'
 cmap = cmr.redshift  # CMasher
 cmap = plt.get_cmap('cmr.redshift')  # MPL
 
-# If you want maps to include correct and incorrect top confidences uncomment CONLY
-
 # %% -------------------------------- INPUTS --------------------------------
 
 # Define a set of random seeds (or just one seed if you want to check)
@@ -70,12 +68,10 @@ Reg = 2  # 0: whole map, 1: 4 of SW (h500 - All samples), 2: NW (h500 - Underest
 if Reg == 1:
     xlat_slice = slice(33.9, 37.6)
     xlon_slice = slice(255.4, 260.6)
-elif Reg == 2:
-    xlat_slice = slice(45.9, 49.6)
-    xlon_slice = slice(237.4, 242.6)
 else:
     xlat_slice = slice(23.9, 49.6)
     xlon_slice = slice(235.4, 293.6)
+
 
 # # # # # # # # # #  NEURAL NETWORK INPUTS # # # # # # # # # #
 
@@ -186,6 +182,7 @@ idx_all = pd.merge(idx_date, mdata_ymd, on='dates')
 # 1 all samples, 3 classes (predicted class), 3 classes (actual class), 4 all samples each season, 3*4 (class*season)
 acc_map_tot = 23
 Acc_Map_Data = np.empty((acc_map_tot, len(CONUS_lons), len(CONUS_lats)))
+Acc_Map_Data[:] = np.nan
 
 # # # # # # # # # #  REGIONS # # # # # # # # # #
 
