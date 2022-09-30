@@ -176,7 +176,67 @@ mdata_ymd = mdata_ymd.drop(['year', 'month', 'day'], axis=1)
 # Merge with time data
 idx_all = pd.merge(idx_date, mdata_ymd, on='dates')
 
+# # # # # # # # # #  ACCURACY MAP SET-UP # # # # # # # # # #
 
+# 23 is for the 23 maps I'll make
+# 1 all samples, 3 classes (predicted class), 3 classes (actual class), 4 all samples each season, 3*4 (class*season)
+acc_map_tot = 23
+Acc_Map_Data = np.empty((acc_map_tot, len(CONUS_lons), len(CONUS_lats)))
+Acc_Map_Data[:] = np.nan
+
+# # # # # # # # # #  REGIONS # # # # # # # # # #
+
+# If we're not running a full map, save data for the region / group of 4 grid points
+if Reg != 0:
+    loc_arr = []  # idx
+    loc_arrCN = []  # Correct or No
+    loc_arrCLS = []  # Class
+
+    # Set up a counter, so we can determine how many grid points we're running for
+    counter = 0
+
+# Convert lat and lons into grid pts
+ptlats = []
+for i in range(len(CONUS_lons)):  # repeat list of lats multiple times
+    for element in CONUS_lats:
+        ptlats += [element]
+ptlats = np.array(ptlats)
+
+ptlons = []
+for i in range(len(CONUS_lons)):  # repeat first lon multiple times, then second lon, etc
+    for j in range(len(CONUS_lats)):
+        ptlons += [CONUS_lons[i]]
+ptlons = np.array(ptlons)
+
+# Make sure lons match shapefile lons
+ptlons = ptlons - 360
+
+# Read in shapefiles & set coords
+states = gp.read_file('/Users/jcahill4/DATA/Udders/usa-states-census-2014.shp')
+states.crs = 'EPSG:4326'
+
+# Set regions
+NW = states[states['STUSPS'].isin(['WA', 'OR', 'ID'])]
+SE = states[states['STUSPS'].isin(['FL', 'GA', 'AL', 'SC', 'NC', 'VA'])]
+
+# put lat and lons into array as gridpoints using geopandas
+SF_grid = pd.DataFrame({'longitude': ptlons, 'latitude': ptlats})
+gdf = gp.GeoDataFrame(SF_grid, geometry=gp.points_from_xy(SF_grid.longitude, SF_grid.latitude))
+
+# Plot region
+if Reg == 2:
+    region = NW
+elif Reg == 3:
+    region = SE
+else:
+    region = states
+US_pts = gp.sjoin(gdf, region, op='within')
+us_boundary_map = states.boundary.plot(color="white", linewidth=1)
+US_pts.plot(ax=us_boundary_map, color='pink')
+plt.show()
+
+# put lat and lons into pandas df
+reg_lon_lat = pd.DataFrame({'longitude': US_pts.longitude, 'latitude': US_pts.latitude})
 
 # %% # # # # # # # # #  RUN NEURAL NETWORK FOR EACH LOCATION AND SEED # # # # # # # # # #
 for c1, xxx in enumerate(CONUS_lons):
@@ -394,7 +454,267 @@ for c1, xxx in enumerate(CONUS_lons):
                 ActClass = hit_miss[:, 2]  # Actual Classes (least to most confident)
                 CorrOrNo = hit_miss[:, 0]  # array for if pred correct [1] or not [0] (least to most confident)
 
+                # # # # # # # # # # # ACCURACY & HEAT MAP INFO # # # # # # # # # #
 
+                # If we want to only look at seeds that are "good enough" - cross a certain threshold, we use this
+                CP_Corr_R = []
+                w = 0
+                while w < len(hit_miss[:, 0]):
+                    CP_Corr_R += [(np.sum(hit_miss[:, 0][w:]) / len(hit_miss[:, 0][w:])) * 100]
+                    w = w + 1
+                CP_Corr_R = np.array(CP_Corr_R)
+                CP_Corr_R = np.mean(CP_Corr_R.reshape(-1, 9), axis=1)
+
+                # Add data to array only if the run is "good" (over 40% acc, never under 20% acc for 50% most conf runs)
+                # if np.min(CP_Corr_R[-6:]) > 20.0 and np.max(CP_Corr_R) > 40.0:
+                if np.min(CP_Corr_R[-6:]) > 0.0 and np.max(CP_Corr_R) > 0.0:  # This just mean grab all files
+                    Bmaps20 = Bmaps[int(len(Bmaps) * 0.80):]  # top 20% idx's - .8 <-> top 20% data
+                    WinClass20 = WinClass[int(len(WinClass) * 0.8):]  # Predicted class
+                    ActClass20 = ActClass[int(len(ActClass) * 0.8):]  # Actual Class
+                    CorrOrNo20 = CorrOrNo[int(len(CorrOrNo) * 0.8):]  # Correct (1) or not (0) ?
+
+                    # list for heatmaps
+                    locos += [Bmaps20]
+                    locosCN += [CorrOrNo20]
+                    locosCLS += [WinClass20]
+
+                    # Create pd arrays based on season
+                    sum_pd = idx_all[idx_all["Season"] == 'Sum']
+                    fall_pd = idx_all[idx_all["Season"] == 'Fall']
+                    wint_pd = idx_all[idx_all["Season"] == 'Wint']
+                    spr_pd = idx_all[idx_all["Season"] == 'Spr']
+
+                    # Create list of seasonal pd arrays
+                    X_pd = [sum_pd, fall_pd, wint_pd, spr_pd]
+
+                    # Base pandas array for calculating accuracies
+                    CorrCount_pd = pd.DataFrame({'Corr?': CorrOrNo20, 'WinClass': WinClass20, 'ActClass': ActClass20,
+                                                 'Index': Bmaps20})
+
+                    # # # # # # # # # # # ACCURACY MAP - ALL SAMPLES # # # # # # # # # #
+                    CorrCount = np.count_nonzero(CorrOrNo20 == 1)
+                    acc_lists[0] += [CorrCount / len(CorrOrNo20)]
+
+                    # Calculate Accuracy for each Season
+                    for ij in range(4):  # 4 seasons
+
+                        # Get specific season
+                        szn_pd = pd.merge(X_pd[ij], CorrCount_pd, on='Index')
+
+                        # accuracy calculation
+                        if 1 in szn_pd['Corr?'].values:  # Check if there's any correct values for this szn / class
+                            CorrCountsumX = szn_pd['Corr?'].value_counts()[1]
+                            acc_lists[7 + ij] += [CorrCountsumX / len(szn_pd['Index'])]
+                        else:
+                            acc_lists[7 + ij] += [np.nan]
+
+                    # # # # # # # # # # # ACCURACY MAP - BY CLASS # # # # # # # # # #
+                    for iii in range(Classes):
+
+                        # Get specific class
+                        CorrCountX_pd = CorrCount_pd[CorrCount_pd["WinClass"] == iii]
+
+                        # Correct samples only (for calculating accuracy)
+                        CorrCountX_list = CorrCountX_pd.iloc[:, 0]
+                        CorrCountX = np.count_nonzero(CorrCountX_list == 1)
+
+                        # Calculate Accuracy for Predicted Class
+                        if len(CorrCountX_list) == 0:
+                            acc_lists[iii + 1] += [np.nan]
+                        else:
+                            acc_lists[iii + 1] += [CorrCountX / len(CorrCountX_list)]
+
+                        # Calculate Accuracy for Actual Class
+                        CorrCountX_pd_a = CorrCount_pd[CorrCount_pd["ActClass"] == iii]
+                        CorrCountX_list_a = CorrCountX_pd_a.iloc[:, 0]
+                        CorrCountX_a = np.count_nonzero(CorrCountX_list_a == 1)
+                        if len(CorrCountX_list_a) == 0:
+                            acc_lists[iii + 4] += [np.nan]
+                        else:
+                            acc_lists[iii + 4] += [CorrCountX_a / len(CorrCountX_list_a)]
+
+                        # Calculate Accuracy for each Season
+                        for ii in range(4):  # 4 seasons
+
+                            # Get specific season
+                            szn_pd = pd.merge(X_pd[ii], CorrCountX_pd, on='Index')
+
+                            # Accuracy calculation
+                            if 1 in szn_pd['Corr?'].values:  # Check if there's any correct values for this szn / class
+                                CorrCountsumX = szn_pd['Corr?'].value_counts()[1]
+                                acc_lists[11 + iii * 4 + ii] += [CorrCountsumX / len(szn_pd['Index'])]
+                            else:
+                                acc_lists[11 + iii * 4 + ii] += [np.nan]
+
+                # If we are throwing out certain seeds, this counts how many we throw out
+                else:
+                    Trash = Trash + 1
+
+            # Average each season / class over all the seeds
+            for abc in range(acc_map_tot):
+                Acc_Map_Data[abc][c1][c2] = np.nanmean(acc_lists[abc])
+
+            if Reg != 0:
+                loc_arr += [locos]
+                loc_arrCN += [locosCN]
+                loc_arrCLS += [locosCLS]
+print('DONE')
+
+# %% # # # # # # # # #  ACCURACY MAPS - PLOTTING # # # # # # # # # #
+
+# Map inputs
+ecolor = 'dimgray'  # makes lakes and borders light gray
+fsize = 24  # fontsize
+lons_p = np.append(CONUS_lons, CONUS_lons[-1] + 2) - 1  # pcolor are boxes, so set start and end pts of the boxes
+lats_p = np.append(CONUS_lats, CONUS_lats[-1] + 2) - 1  # lons_p / lats_p make it so box centers are lons / lats
+Seas_Name = [' - Summer', ' - Fall', ' - Winter', ' - Spring', '']
+Cls_Name = ['(UFS Underestimates)', '(UFS Underestimates)', '(UFS Underestimates)', '(All Samples)']
+
+# Make Each Map
+for acm in range(Acc_Map_Data.shape[0]):
+
+    # Set-up maps
+    fig = plt.figure(figsize=(10, 8))
+
+    # Define map type and its size
+    ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
+    ax.set_extent([53.5, 113.5, 22, 50], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
+
+    # Set levels and output name variables
+    if acm == 0:
+        vmin = .325  # all seasons - all classes
+        vmax = .5
+        vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.4125, vmax=vmax)
+        seas = 4
+        clss = 3
+        Pr = 0
+    elif acm < 7:
+        vmin = .3  # all seasons - specific class
+        vmax = .7
+        vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.5, vmax=vmax)
+        seas = 4
+        clss = (acm + 2) % 3
+        if acm < 4:
+            Pr = 0  # Predicted Class (0) or True Class (0)
+        else:
+            Pr = 1
+    elif acm < 11:
+        vmin = .35  # specific season - all classes
+        vmax = .6
+        vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.475, vmax=vmax)
+        seas = (acm + 1) % 4
+        clss = 3
+        Pr = 0
+    else:
+        vmin = .4  # specific season - specific class
+        vmax = 1.0
+        vmid = colors.TwoSlopeNorm(vmin=vmin, vcenter=.7, vmax=vmax)
+        seas = (acm + 1) % 4
+        clss = (acm - 11) // 4
+        Pr = 0
+
+    # Add features
+    # ax.add_feature(cfeature.LAND, color='white')
+    ax.add_feature(cfeature.COASTLINE)
+    ax.add_feature(cfeature.STATES.with_scale('10m'), edgecolor=ecolor)
+    ax.add_feature(cfeature.BORDERS, edgecolor=ecolor)
+    ax.add_feature(cfeature.LAKES, color=ecolor, alpha=0.5)
+
+    # plot
+    cf = ax.pcolor(lons_p - 180, lats_p, Acc_Map_Data[acm].T, vmin=vmin, vmax=vmax, norm=vmid,
+                   cmap=plt.cm.get_cmap('Reds'), transform=ccrs.PlateCarree(central_longitude=180))
+
+    # plot info
+    cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)
+    plt.title('Accuracy of Predicting {} Errors in the UFS{}\nLead Time of 10-14 days {}'.format(Pred, Seas_Name[seas],
+                                                                                                 Cls_Name[clss]),
+              fontsize=fsize)
+    plt.tight_layout()
+    plt.savefig('AccMap_{}_Re{}Se{}Cls{}Pr{}Lt{}{}N{}Lr{}'.format(Pred, Reg, seas, clss, Pr, lead_time1, lead_time2,
+                                                                   nodes, str(LR).split('.')[1]), dpi=300)
+    plt.show()
+
+
+# %% # # # # # # # # #  HEAT MAPS - PLOTTING # # # # # # # # # #
+
+# Specify which class we're interested in plotting
+class_num = 0
+
+# Make a "total" hmap that can we can divide by to normalize the hmaps
+hmap_main = np.zeros((3, 9))
+for x in np.arange(-1, 2, 1):
+    ENSOs = idx_all.loc[idx_all['E_Phase'] == x]
+    for y in np.arange(0, 9, 1):
+        MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
+        hmap_main[x + 1, y] = len(MJO_ENSO['Index'])
+
+# Organize necessary info for hmaps
+for xy in range(counter):
+
+    # flatten each list (each seed has own array)
+    flat_idx = np.concatenate(loc_arr[xy]).ravel()     # index
+    flat_CNO = np.concatenate(loc_arrCN[xy]).ravel()   # correct or not?
+    flat_CLS = np.concatenate(loc_arrCLS[xy]).ravel()  # class
+
+    # Then combine the lists within our specified region
+    if xy == 0:
+        flat_idx_all = flat_idx
+        flat_CNO_all = flat_CNO
+        flat_CLS_all = flat_CLS
+    else:
+        flat_idx_all = np.concatenate([flat_idx_all, flat_idx])
+        flat_CNO_all = np.concatenate([flat_CNO_all, flat_CNO])
+        flat_CLS_all = np.concatenate([flat_CLS_all, flat_CLS])
+
+# Separate based on class and correct samples
+all_all = pd.DataFrame({'Index': flat_idx_all, 'CorrOrNo': flat_CNO_all, 'Class': flat_CLS_all})
+all_corr = all_all[all_all['CorrOrNo'] == 1].reset_index(drop=True)
+class_all = all_all[all_all['Class'] == class_num].reset_index(drop=True)
+class_corr = class_all[class_all['CorrOrNo'] == 1].reset_index(drop=True)
+
+# Put them in a list, so we can loop through them
+info_list = [all_all, all_corr, class_all, class_corr]
+
+# Output Names
+out_names = ['all_all', 'all_corr', '{}_all'.format(class_num), '{}_corr'.format(class_num)]
+
+# Organize and plot each hmap
+for inf in range(len(info_list)):
+
+    # Count indices
+    info_count = info_list[inf].groupby(['Index'])['Index'].count()
+    info_count_df = info_count.to_frame()
+    info_idx = info_count_df.index                               # Indices
+    info_counts = info_count_df['Index'].reset_index(drop=True)  # Count
+
+    # Convert index and counts into pandas array
+    countpd = pd.DataFrame({'Index': info_idx, 'count': info_counts})
+
+    # Merge with ENSO and MJO info
+    EMJO = pd.merge(countpd, idx_all, on='Index')
+
+    # Create hmap to show frequency of ENSO and MJO
+    hmap = np.zeros((3, 9))
+    for x in np.arange(-1, 2, 1):
+        ENSOs = EMJO.loc[EMJO['E_Phase'] == x]
+        for y in np.arange(0, 9, 1):
+            MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
+            hmap[x + 1, y] = len(MJO_ENSO['Index'])
+    hmap = hmap / hmap_main
+
+    # Plot hmap
+    plt.imshow(hmap, cmap=plt.cm.Reds)
+    plt.xlabel('MJO Phase')
+    plt.ylabel('ENSO Phase')
+    plt.title('Frequency of Oscillation Phase', fontsize=16)
+    plt.xticks([0, 1, 2, 3, 4, 5, 6, 7, 8], ['None', 1, 2, 3, 4, 5, 6, 7, 8])
+    plt.yticks([0, 1, 2], ['La Niña', 'Neutral', 'El Niño'])
+    plt.colorbar(shrink=0.75, label='Frequency')
+    plt.tight_layout()
+    plt.savefig(
+        'Heatmap_{}_{}_Re{}_Lt{}{}N{}Lr{}'.format(out_names[inf], Pred, Reg, lead_time1, lead_time2, nodes,
+                                                  str(LR).split('.')[1]), dpi=300)
+    plt.show()
 
 # %% # # # # # # # # #  EXTRA STUFF # # # # # # # # # #
 
