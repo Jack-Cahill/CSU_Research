@@ -62,7 +62,7 @@ LT_tot = 35  # how many total lead times are there in the UFS forecast?
 dec = 0  # 0 if normal, 1 if decrease
 
 # Whole map or just a subset?
-Reg = 2  # 0: whole map, 1: 4 of SW (h500 - All samples), 2: NW (h500 - Underestimates), 3: SE (h500 - Overestimates)
+Reg = 3  # 0: whole map, 1: 4 of SW (h500 - All samples), 2: NW (h500 - Underestimates), 3: SE (h500 - Overestimates)
 
 # Create CONUS grid
 if Reg == 1:
