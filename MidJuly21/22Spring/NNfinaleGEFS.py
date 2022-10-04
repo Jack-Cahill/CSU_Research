@@ -638,7 +638,7 @@ for acm in range(Acc_Map_Data.shape[0]):
 # %% # # # # # # # # #  HEAT MAPS - PLOTTING # # # # # # # # # #
 
 # Specify which class we're interested in plotting
-class_num = 0
+class_num = 2
 
 # Make a "total" hmap that can we can divide by to normalize the hmaps
 hmap_main = np.zeros((3, 9))
