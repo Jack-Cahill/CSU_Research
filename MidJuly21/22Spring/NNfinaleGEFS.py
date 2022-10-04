@@ -150,13 +150,7 @@ mdata_ymd['Amp'] = mdata['Amplitude']
 mdata_ymd['Amp'] = pd.to_numeric(mdata_ymd['Amp'], downcast="float")
 
 # RMM adjustment (if Amplitude (sqrt(RMM1^2 + RMM2^2)) < 1, then convert phase to 0 (phase 0 is just no MJO Phase)
-i = 0
-while i < len(mdata_ymd['Amp']):
-    if mdata_ymd['Amp'][i] < 1.0:
-        mdata_ymd['M_Phase'][i] = 0
-        i = i + 1
-    else:
-        i = i + 1
+mdata_ymd['M_Phase'] = np.where(mdata_ymd['Amp'] < 1.0, 0, mdata_ymd['M_Phase'])
 
 # Create new column for season
 mdata_ymd.loc[mdata_ymd['month'].between(5.9, 8.1), 'Season'] = 'Sum'
@@ -167,6 +161,7 @@ mdata_ymd.loc[mdata_ymd['month'].between(2.9, 5.1), 'Season'] = 'Spr'
 
 # Drop Y-M-D
 mdata_ymd = mdata_ymd.drop(['year', 'month', 'day'], axis=1)
+print(mdata_ymd[:100])
 
 # Merge with time data
 idx_all = pd.merge(idx_date, mdata_ymd, on='dates')
