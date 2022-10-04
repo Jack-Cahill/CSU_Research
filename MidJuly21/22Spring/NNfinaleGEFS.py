@@ -28,7 +28,7 @@ pd.options.mode.chained_assignment = None  # default='warn'
 cmap = cmr.redshift  # CMasher
 cmap = plt.get_cmap('cmr.redshift')  # MPL
 
-# %% -------------------------------- INPUTS --------------------------------
+# %% # # # # # # # # # # INPUTS # # # # # # # # # #
 
 # Define a set of random seeds (or just one seed if you want to check)
 seeds = [92, 95, 100, 137, 141, 142]
@@ -191,17 +191,8 @@ if Reg != 'full':
     counter = 0
 
 # Convert lat and lons into grid pts
-ptlats = []
-for i in range(len(CONUS_lons)):  # repeat list of lats multiple times
-    for element in CONUS_lats:
-        ptlats += [element]
-ptlats = np.array(ptlats)
-
-ptlons = []
-for i in range(len(CONUS_lons)):  # repeat first lon multiple times, then second lon, etc
-    for j in range(len(CONUS_lats)):
-        ptlons += [CONUS_lons[i]]
-ptlons = np.array(ptlons)
+ptlats = np.tile(CONUS_lats, len(CONUS_lons))
+ptlons = np.repeat(CONUS_lons, len(CONUS_lats))
 
 # Make sure lons match shapefile lons
 ptlons = ptlons - 360
