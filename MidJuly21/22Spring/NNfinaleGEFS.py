@@ -32,7 +32,7 @@ cmap = plt.get_cmap('cmr.redshift')  # MPL
 
 # Define a set of random seeds (or just one seed if you want to check)
 seeds = [92, 95, 100, 137, 141, 142]
-#seeds = np.arange(88, 89, 1)
+seeds = np.arange(88, 89, 1)
 
 # Define Input Map variable
 variable = 'olr'
@@ -62,15 +62,11 @@ LT_tot = 35  # how many total lead times are there in the UFS forecast?
 dec = 0  # 0 if normal, 1 if decrease
 
 # Whole map or just a subset?
-Reg = 3  # 0: whole map, 1: 4 of SW (h500 - All samples), 2: NW (h500 - Underestimates), 3: SE (h500 - Overestimates)
+Reg = '4'  # 'full', '4': SW (h500 - All samples), 'NW': NW (h500 - Underestimates), 'SE': SE (h500 - Overestimates)
 
 # Create CONUS grid
-if Reg == 1:
-    xlat_slice = slice(33.9, 37.6)
-    xlon_slice = slice(255.4, 260.6)
-else:
-    xlat_slice = slice(23.9, 49.6)
-    xlon_slice = slice(235.4, 293.6)
+Reg_dict = {'full': [slice(23.9, 49.6), slice(235.4, 293.6)], '4': [slice(33.9, 37.6), slice(255.4, 260.6)],
+            'NW': [slice(23.9, 49.6), slice(235.4, 293.6)], 'SE': [slice(23.9, 49.6), slice(235.4, 293.6)]}
 
 
 # # # # # # # # # #  NEURAL NETWORK INPUTS # # # # # # # # # #
@@ -126,8 +122,7 @@ ds_UFS1_base = xr.open_mfdataset('/Users/jcahill4/DATA/{}/UFS/{}/*.nc'.format(Pr
 ds_obs1_base = xr.open_dataset('/Users/jcahill4/DATA/{}/Obs/{}/clima_{}.nc'.format(Pred, cdata, Pred))
 ds_UFS_base = xr.open_mfdataset('/Users/jcahill4/DATA/{}/UFS/{}/*.nc'.format(Pred, cdata), concat_dim='time',
                                 combine='nested')
-
-CONUS = ds_obs1_base['h500'].sel(lat=xlat_slice, lon=xlon_slice)
+CONUS = ds_obs1_base['h500'].sel(lat=Reg_dict[Reg][0], lon=Reg_dict[Reg][1])
 CONUS_lats = CONUS.lat.values[::4]
 CONUS_lons = CONUS.lon.values[::4]
 CONUS_lons = CONUS_lons[:len(CONUS_lons) - 1]
@@ -187,7 +182,7 @@ Acc_Map_Data[:] = np.nan
 # # # # # # # # # #  REGIONS # # # # # # # # # #
 
 # If we're not running a full map, save data for the region / group of 4 grid points
-if Reg != 0:
+if Reg != 'full':
     loc_arr = []  # idx
     loc_arrCN = []  # Correct or No
     loc_arrCLS = []  # Class
@@ -224,9 +219,9 @@ SF_grid = pd.DataFrame({'longitude': ptlons, 'latitude': ptlats})
 gdf = gp.GeoDataFrame(SF_grid, geometry=gp.points_from_xy(SF_grid.longitude, SF_grid.latitude))
 
 # Plot region
-if Reg == 2:
+if Reg == 'NW':
     region = NW
-elif Reg == 3:
+elif Reg == 'SE':
     region = SE
 else:
     region = states
@@ -324,25 +319,13 @@ for c1, xxx in enumerate(CONUS_lons):
                     q1 = ds10['Error'].quantile(0.33)
                     q2 = ds10['Error'].quantile(0.67)
 
-                    # Create classes
-                    ds10.loc[ds10['Error'].between(float('-inf'), q1), 'Class'] = 0
-                    ds10.loc[ds10['Error'].between(q1, q2), 'Class'] = 1
-                    ds10.loc[ds10['Error'].between(q2, float('inf')), 'Class'] = 2
+                    # Create Classes
+                    ds10['Class'] = np.digitize(ds10['Error'], [q1, q2])  # convert to classes based on breaks in q
                     ds_UFSp = ds10
 
                 elif Classes == 5:
-                    # Find ranges for classes (this uses 5 classes)
-                    q1 = ds10['Error'].quantile(0.2)
-                    q2 = ds10['Error'].quantile(0.4)
-                    q3 = ds10['Error'].quantile(0.6)
-                    q4 = ds10['Error'].quantile(0.8)
-
-                    # Create classes
-                    ds10.loc[ds10['Error'].between(float('-inf'), q1), 'Class'] = 0
-                    ds10.loc[ds10['Error'].between(q1, q2), 'Class'] = 1
-                    ds10.loc[ds10['Error'].between(q2, q3), 'Class'] = 2
-                    ds10.loc[ds10['Error'].between(q3, q4), 'Class'] = 3
-                    ds10.loc[ds10['Error'].between(q4, float('inf')), 'Class'] = 4
+                    q = np.quantile(ds10['Error'], np.arange(1, Classes) / Classes)  # returns quantile breaks
+                    ds10['Class'] = np.digitize(ds10['Error'], q)
                     ds_UFSp = ds10
 
                 # PART 4: SEPARATE DATA
@@ -554,7 +537,7 @@ for c1, xxx in enumerate(CONUS_lons):
             for abc in range(acc_map_tot):
                 Acc_Map_Data[abc][c1][c2] = np.nanmean(acc_lists[abc])
 
-            if Reg != 0:
+            if Reg != 'full':
                 loc_arr += [locos]
                 loc_arrCN += [locosCN]
                 loc_arrCLS += [locosCLS]
@@ -568,7 +551,7 @@ fsize = 24  # fontsize
 lons_p = np.append(CONUS_lons, CONUS_lons[-1] + 2) - 1  # pcolor are boxes, so set start and end pts of the boxes
 lats_p = np.append(CONUS_lats, CONUS_lats[-1] + 2) - 1  # lons_p / lats_p make it so box centers are lons / lats
 Seas_Name = [' - Summer', ' - Fall', ' - Winter', ' - Spring', '']
-Cls_Name = ['(UFS Underestimates)', '(UFS Underestimates)', '(UFS Underestimates)', '(All Samples)']
+Cls_Name = ['(UFS Underestimates)', '(UFS Accurate Estimates)', '(UFS Overestimates)', '(All Samples)']
 
 # Make Each Map
 for acm in range(Acc_Map_Data.shape[0]):
@@ -631,7 +614,7 @@ for acm in range(Acc_Map_Data.shape[0]):
               fontsize=fsize)
     plt.tight_layout()
     plt.savefig('AccMap_{}_Re{}Se{}Cls{}Pr{}Lt{}{}N{}Lr{}'.format(Pred, Reg, seas, clss, Pr, lead_time1, lead_time2,
-                                                                   nodes, str(LR).split('.')[1]), dpi=300)
+                                                                  nodes, str(LR).split('.')[1]), dpi=300)
     plt.show()
 
 
