@@ -1,3 +1,5 @@
+# This file provides all the pieces of my artifical neural network as of (2/16/23)
+
 import geopandas as gp
 import tensorflow as tf
 import sys
