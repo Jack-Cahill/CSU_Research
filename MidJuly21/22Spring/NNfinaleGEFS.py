@@ -5,6 +5,7 @@ import numpy as np
 import xarray as xr
 import pandas as pd
 import time
+import datetime
 import matplotlib.pyplot as plt
 import cmasher as cmr
 from sklearn import preprocessing
@@ -28,9 +29,7 @@ pd.options.mode.chained_assignment = None  # default='warn'
 cmap = cmr.redshift  # CMasher
 cmap = plt.get_cmap('cmr.redshift')  # MPL
 
-# If you want maps to include correct and incorrect top confidences uncomment CONLY
-
-# %% -------------------------------- INPUTS --------------------------------
+# %% # # # # # # # # # # INPUTS # # # # # # # # # #
 
 # Define a set of random seeds (or just one seed if you want to check)
 seeds = [92, 95, 100, 137, 141, 142]
@@ -47,7 +46,7 @@ elif variable == 'u200':
     lon_slice = slice(120, 300)
     Map = 2
 
-# Define
+# Define predictor
 Pred = 'h500'
 if Pred == 'prcp':
     Predictor = 0
@@ -64,24 +63,21 @@ LT_tot = 35  # how many total lead times are there in the UFS forecast?
 dec = 0  # 0 if normal, 1 if decrease
 
 # Whole map or just a subset?
-Reg = 2  # 0: whole map, 1: 4 of SW (h500 - All samples), 2: NW (h500 - Underestimates), 3: SE (h500 - Overestimates)
+Reg = '4'  # 'full', '4': SW (h500 - All classes), 'NW': NW (h500 - Underestimates), 'SE': SE (h500 - Overestimates)
 
-# Create CONUS grid
-if Reg == 1:
-    xlat_slice = slice(33.9, 37.6)
-    xlon_slice = slice(255.4, 260.6)
-elif Reg == 2:
-    xlat_slice = slice(45.9, 49.6)
-    xlon_slice = slice(237.4, 242.6)
-else:
-    xlat_slice = slice(23.9, 49.6)
-    xlon_slice = slice(235.4, 293.6)
+# Dict for region (lat, lon, Class name, class number, map size, epoch size)
+Reg_dict = {'full': [slice(23.9, 49.6), slice(235.4, 293.6), 'All Classes', 0, 6, 10_000],
+            '4': [slice(33.9, 37.6), slice(255.4, 260.6), 'All Classes', 0, 0, 10_000],
+            'NW': [slice(23.9, 49.6), slice(235.4, 293.6), 'Underestimates', 0, 7, 10_000],
+            'SE': [slice(23.9, 49.6), slice(235.4, 293.6), 'Overestimates', 2, 6, 10_000],
+            'SW': [slice(23.9, 49.6), slice(235.4, 293.6), 'Underestimates', 0, 7, 10_000],
+            'full_epoch': [slice(23.9, 49.6), slice(235.4, 293.6), 'All Classes', 0, 6, 1000]}
 
 # # # # # # # # # #  NEURAL NETWORK INPUTS # # # # # # # # # #
 
 lead_time1 = 10  # will be averaged from LT1-LT2
 lead_time2 = 14
-epochs = 10_000
+epochs = Reg_dict[Reg][5]
 nodes = 20
 batch_size = 32  # Not identified in plot naming scheme
 LR = 0.01  # Learning Rate
@@ -103,7 +99,7 @@ else:
 # # # # # # # # # #  READ IN DATA # # # # # # # # # #
 
 # OBS
-# Read in ALL obs using xarray and paramters
+# Read in ALL obs using xarray and parameters
 ds_obs = xr.open_mfdataset('/Users/jcahill4/DATA/{}/Obs/{}/clima_{}.nc'.format(
     variable, cdata, variable), concat_dim='time', combine='nested')
 ds_obs = ds_obs[variable].sel(lon=lon_slice, lat=lat_slice)
@@ -115,13 +111,13 @@ lons = lons + 180
 
 # Turn obs into a pandas array
 ds_obs_l = list(zip(ds_obs.time.values, ds_obs.values))
-ds_obs = pd.DataFrame(ds_obs_l)
-ds_obs.columns = ['time', '{} obs'.format(variable)]
+ds_obs_all = pd.DataFrame(ds_obs_l)
+ds_obs_all.columns = ['time', '{} obs'.format(variable)]
 
 # Get dates that match UFS dates (weekly forecasts)
-ds_obs = ds_obs[4:7295:7]  # 4: start at 1-5-00, 7295: end at 12-18-19, 7: weekly forecast
-ds_obs = ds_obs.reset_index(drop=True)
-ds = ds_obs.sort_values(by='time')
+ds_obs_sub = ds_obs_all[4:7295:7]  # 4: start at 1-5-00, 7295: end at 12-18-19, 7: weekly forecast
+ds_obs_sub = ds_obs_sub.reset_index(drop=True)
+ds = ds_obs_sub.sort_values(by='time')
 timer = ds['time']
 
 # Pred data base
@@ -130,8 +126,7 @@ ds_UFS1_base = xr.open_mfdataset('/Users/jcahill4/DATA/{}/UFS/{}/*.nc'.format(Pr
 ds_obs1_base = xr.open_dataset('/Users/jcahill4/DATA/{}/Obs/{}/clima_{}.nc'.format(Pred, cdata, Pred))
 ds_UFS_base = xr.open_mfdataset('/Users/jcahill4/DATA/{}/UFS/{}/*.nc'.format(Pred, cdata), concat_dim='time',
                                 combine='nested')
-
-CONUS = ds_obs1_base['h500'].sel(lat=xlat_slice, lon=xlon_slice)
+CONUS = ds_obs1_base['h500'].sel(lat=Reg_dict[Reg][0], lon=Reg_dict[Reg][1])
 CONUS_lats = CONUS.lat.values[::4]
 CONUS_lons = CONUS.lon.values[::4]
 CONUS_lons = CONUS_lons[:len(CONUS_lons) - 1]
@@ -148,6 +143,7 @@ idx_date = pd.DataFrame({'Index': val_idx, 'dates': date_list, 'obs': obs_maps})
 
 # Merge MJO and ENSO info
 mdata = pd.read_csv('/Users/jcahill4/Downloads/mjo_phase1.csv')
+mdata = mdata.drop_duplicates()
 mdata_ymd = mdata.iloc[:, :3]  # Just grab YMD data
 mdata_dt1 = pd.to_datetime(mdata_ymd[['year', 'month', 'day']])  # convert YMD columns to one dt column
 
@@ -159,20 +155,14 @@ mdata_ymd['Amp'] = mdata['Amplitude']
 mdata_ymd['Amp'] = pd.to_numeric(mdata_ymd['Amp'], downcast="float")
 
 # RMM adjustment (if Amplitude (sqrt(RMM1^2 + RMM2^2)) < 1, then convert phase to 0 (phase 0 is just no MJO Phase)
-i = 0
-while i < len(mdata_ymd['Amp']):
-    if mdata_ymd['Amp'][i] < 1.0:
-        mdata_ymd['M_Phase'][i] = 0
-        i = i + 1
-    else:
-        i = i + 1
+mdata_ymd['M_Phase'] = np.where(mdata_ymd['Amp'] < 1.0, 0, mdata_ymd['M_Phase'])
 
 # Create new column for season
-mdata_ymd.loc[mdata_ymd['month'].between(5.9, 8.1), 'Season'] = 'Sum'
+mdata_ymd.loc[mdata_ymd['month'].between(5.9, 8.1), 'Season'] = 'Summer'
 mdata_ymd.loc[mdata_ymd['month'].between(8.9, 11.1), 'Season'] = 'Fall'
-mdata_ymd.loc[mdata_ymd['month'].between(11.9, 12.1), 'Season'] = 'Wint'
-mdata_ymd.loc[mdata_ymd['month'].between(0.9, 2.1), 'Season'] = 'Wint'
-mdata_ymd.loc[mdata_ymd['month'].between(2.9, 5.1), 'Season'] = 'Spr'
+mdata_ymd.loc[mdata_ymd['month'].between(11.9, 12.1), 'Season'] = 'Winter'
+mdata_ymd.loc[mdata_ymd['month'].between(0.9, 2.1), 'Season'] = 'Winter'
+mdata_ymd.loc[mdata_ymd['month'].between(2.9, 5.1), 'Season'] = 'Spring'
 
 # Drop Y-M-D
 mdata_ymd = mdata_ymd.drop(['year', 'month', 'day'], axis=1)
@@ -180,17 +170,38 @@ mdata_ymd = mdata_ymd.drop(['year', 'month', 'day'], axis=1)
 # Merge with time data
 idx_all = pd.merge(idx_date, mdata_ymd, on='dates')
 
+# # # # # # # # # # PANDAS PRED OBS (FOR OUT MAPS) # # # # # # # # # #
+
+Pred_sliceLat = slice(-30, 65)
+Pred_sliceLon = slice(60, 300)
+
+# Turn preds into a pandas array
+ds_obs1_base_Pred = ds_obs1_base[Pred].sel(lat=Pred_sliceLat, lon=Pred_sliceLon)
+ds_obs1_base_l = list(zip(ds_obs1_base_Pred.time.values, ds_obs1_base_Pred.values))
+pred_obs = pd.DataFrame(ds_obs1_base_l)
+pred_obs.columns = ['dates', '{} obs'.format(Pred)]
+
+# drop data that's not validation to speed up runtime
+pred_obs = pred_obs[~(pred_obs['dates'] < '2016-07-01')]
+pred_obs = pred_obs.reset_index(drop=True)
+
+# # # # # # # # # #  WINDS # # # # # # # # # #
+
+dfu = xr.open_mfdataset('/Users/jcahill4/DATA/u200/Obs/daily_gefs/*.nc', concat_dim='time', combine='nested')
+dfv = xr.open_mfdataset('/Users/jcahill4/DATA/v200/Obs/daily_gefs/*.nc', concat_dim='time', combine='nested')
+
 # # # # # # # # # #  ACCURACY MAP SET-UP # # # # # # # # # #
 
 # 23 is for the 23 maps I'll make
 # 1 all samples, 3 classes (predicted class), 3 classes (actual class), 4 all samples each season, 3*4 (class*season)
 acc_map_tot = 23
 Acc_Map_Data = np.empty((acc_map_tot, len(CONUS_lons), len(CONUS_lats)))
+Acc_Map_Data[:] = np.nan
 
 # # # # # # # # # #  REGIONS # # # # # # # # # #
 
 # If we're not running a full map, save data for the region / group of 4 grid points
-if Reg != 0:
+if Reg != 'full':
     loc_arr = []  # idx
     loc_arrCN = []  # Correct or No
     loc_arrCLS = []  # Class
@@ -199,17 +210,8 @@ if Reg != 0:
     counter = 0
 
 # Convert lat and lons into grid pts
-ptlats = []
-for i in range(len(CONUS_lons)):  # repeat list of lats multiple times
-    for element in CONUS_lats:
-        ptlats += [element]
-ptlats = np.array(ptlats)
-
-ptlons = []
-for i in range(len(CONUS_lons)):  # repeat first lon multiple times, then second lon, etc
-    for j in range(len(CONUS_lats)):
-        ptlons += [CONUS_lons[i]]
-ptlons = np.array(ptlons)
+ptlats = np.tile(CONUS_lats, len(CONUS_lons))
+ptlons = np.repeat(CONUS_lons, len(CONUS_lats))
 
 # Make sure lons match shapefile lons
 ptlons = ptlons - 360
@@ -219,18 +221,27 @@ states = gp.read_file('/Users/jcahill4/DATA/Udders/usa-states-census-2014.shp')
 states.crs = 'EPSG:4326'
 
 # Set regions
-NW = states[states['STUSPS'].isin(['WA', 'OR', 'ID'])]
 SE = states[states['STUSPS'].isin(['FL', 'GA', 'AL', 'SC', 'NC', 'VA'])]
+S = states[states['STUSPS'].isin(['TX', 'OK', 'KS', 'AR', 'LA', 'MS'])]
+SW = states[states['STUSPS'].isin(['UT', 'NM', 'CO', 'AZ'])]
+W = states[states['STUSPS'].isin(['CA', 'NV'])]
+NW = states[states['STUSPS'].isin(['WA', 'OR', 'ID'])]
+WNC = states[states['STUSPS'].isin(['MT', 'WY', 'ND', 'SD', 'NE'])]
+ENC = states[states['STUSPS'].isin(['MN', 'IA', 'WI', 'MI'])]
+C = states[states['STUSPS'].isin(['MO', 'IL', 'IN', 'OH', 'KY', 'TN', 'WV'])]
+NE = states[states['STUSPS'].isin(['PA', 'MD', 'DE', 'NJ', 'CT', 'NY', 'RI', 'MA', 'ME', 'NH', 'VT'])]
 
 # put lat and lons into array as gridpoints using geopandas
 SF_grid = pd.DataFrame({'longitude': ptlons, 'latitude': ptlats})
 gdf = gp.GeoDataFrame(SF_grid, geometry=gp.points_from_xy(SF_grid.longitude, SF_grid.latitude))
 
 # Plot region
-if Reg == 2:
+if Reg == 'NW':
     region = NW
-elif Reg == 3:
+elif Reg == 'SE':
     region = SE
+elif Reg == 'SW':
+    region = SW
 else:
     region = states
 US_pts = gp.sjoin(gdf, region, op='within')
@@ -327,25 +338,13 @@ for c1, xxx in enumerate(CONUS_lons):
                     q1 = ds10['Error'].quantile(0.33)
                     q2 = ds10['Error'].quantile(0.67)
 
-                    # Create classes
-                    ds10.loc[ds10['Error'].between(float('-inf'), q1), 'Class'] = 0
-                    ds10.loc[ds10['Error'].between(q1, q2), 'Class'] = 1
-                    ds10.loc[ds10['Error'].between(q2, float('inf')), 'Class'] = 2
+                    # Create Classes
+                    ds10['Class'] = np.digitize(ds10['Error'], [q1, q2])  # convert to classes based on breaks in q
                     ds_UFSp = ds10
 
                 elif Classes == 5:
-                    # Find ranges for classes (this uses 5 classes)
-                    q1 = ds10['Error'].quantile(0.2)
-                    q2 = ds10['Error'].quantile(0.4)
-                    q3 = ds10['Error'].quantile(0.6)
-                    q4 = ds10['Error'].quantile(0.8)
-
-                    # Create classes
-                    ds10.loc[ds10['Error'].between(float('-inf'), q1), 'Class'] = 0
-                    ds10.loc[ds10['Error'].between(q1, q2), 'Class'] = 1
-                    ds10.loc[ds10['Error'].between(q2, q3), 'Class'] = 2
-                    ds10.loc[ds10['Error'].between(q3, q4), 'Class'] = 3
-                    ds10.loc[ds10['Error'].between(q4, float('inf')), 'Class'] = 4
+                    q = np.quantile(ds10['Error'], np.arange(1, Classes) / Classes)  # returns quantile breaks
+                    ds10['Class'] = np.digitize(ds10['Error'], q)
                     ds_UFSp = ds10
 
                 # PART 4: SEPARATE DATA
@@ -389,7 +388,7 @@ for c1, xxx in enumerate(CONUS_lons):
                     x_val_shp = x_val.reshape(smlnum, len(lats) * len(lons))
 
                 # # # # # # # # # # BUILD NEURAL NETWORK # # # # # # # # # #
-
+                # CHANGE
                 es_callback = tf.keras.callbacks.EarlyStopping(monitor=monitor, patience=PATIENCE, mode=mode,
                                                                restore_best_weights=True, verbose=0)
                 callbacks = [es_callback]
@@ -407,6 +406,7 @@ for c1, xxx in enumerate(CONUS_lons):
 
                 # # # # # # # # # # TRAIN NETWORK # # # # # # # # # #
 
+                # CHANGE
                 start_time = time.time()
                 history = model.fit(x_train_shp, hotlabels_train,
                                     validation_data=(x_val_shp, hotlabels_val),
@@ -416,6 +416,15 @@ for c1, xxx in enumerate(CONUS_lons):
                                     verbose=0,
                                     callbacks=callbacks)
                 stop_time = time.time()
+
+                '''start_time = time.time()
+                history = model.fit(x_train_shp, hotlabels_train,
+                                    validation_data=(x_val_shp, hotlabels_val),
+                                    batch_size=batch_size,
+                                    epochs=epochs,
+                                    shuffle=True,  # shuffle data before each epoch
+                                    verbose=0)
+                stop_time = time.time()'''
 
                 # # # # # # # # # # # PREDICTION & OUTPUT INFO # # # # # # # # # #
 
@@ -470,7 +479,7 @@ for c1, xxx in enumerate(CONUS_lons):
 
                 # Add data to array only if the run is "good" (over 40% acc, never under 20% acc for 50% most conf runs)
                 # if np.min(CP_Corr_R[-6:]) > 20.0 and np.max(CP_Corr_R) > 40.0:
-                if np.min(CP_Corr_R[-6:]) > 0.0 and np.max(CP_Corr_R) > 0.0:  # This just mean grab all files
+                if np.min(CP_Corr_R[-6:]) > -1.0 and np.max(CP_Corr_R) > -1.0:  # This just mean grab all files
                     Bmaps20 = Bmaps[int(len(Bmaps) * 0.80):]  # top 20% idx's - .8 <-> top 20% data
                     WinClass20 = WinClass[int(len(WinClass) * 0.8):]  # Predicted class
                     ActClass20 = ActClass[int(len(ActClass) * 0.8):]  # Actual Class
@@ -482,10 +491,10 @@ for c1, xxx in enumerate(CONUS_lons):
                     locosCLS += [WinClass20]
 
                     # Create pd arrays based on season
-                    sum_pd = idx_all[idx_all["Season"] == 'Sum']
+                    sum_pd = idx_all[idx_all["Season"] == 'Summmer']
                     fall_pd = idx_all[idx_all["Season"] == 'Fall']
-                    wint_pd = idx_all[idx_all["Season"] == 'Wint']
-                    spr_pd = idx_all[idx_all["Season"] == 'Spr']
+                    wint_pd = idx_all[idx_all["Season"] == 'Winter']
+                    spr_pd = idx_all[idx_all["Season"] == 'Spring']
 
                     # Create list of seasonal pd arrays
                     X_pd = [sum_pd, fall_pd, wint_pd, spr_pd]
@@ -557,7 +566,7 @@ for c1, xxx in enumerate(CONUS_lons):
             for abc in range(acc_map_tot):
                 Acc_Map_Data[abc][c1][c2] = np.nanmean(acc_lists[abc])
 
-            if Reg != 0:
+            if Reg != 'full':
                 loc_arr += [locos]
                 loc_arrCN += [locosCN]
                 loc_arrCLS += [locosCLS]
@@ -571,7 +580,7 @@ fsize = 24  # fontsize
 lons_p = np.append(CONUS_lons, CONUS_lons[-1] + 2) - 1  # pcolor are boxes, so set start and end pts of the boxes
 lats_p = np.append(CONUS_lats, CONUS_lats[-1] + 2) - 1  # lons_p / lats_p make it so box centers are lons / lats
 Seas_Name = [' - Summer', ' - Fall', ' - Winter', ' - Spring', '']
-Cls_Name = ['(UFS Underestimates)', '(UFS Underestimates)', '(UFS Underestimates)', '(All Samples)']
+Cls_Name = ['(UFS Underestimates)', '(UFS Accurate Estimates)', '(UFS Overestimates)', '(All Samples)']
 
 # Make Each Map
 for acm in range(Acc_Map_Data.shape[0]):
@@ -633,15 +642,16 @@ for acm in range(Acc_Map_Data.shape[0]):
                                                                                                  Cls_Name[clss]),
               fontsize=fsize)
     plt.tight_layout()
-    plt.savefig('AccMap_{}_Se{}Cls{}Pr{}Lt{}{}N{}Lr{}'.format(Pred, seas, clss, Pr, lead_time1, lead_time2, nodes,
-                                                              str(LR).split('.')[1]), dpi=300)
+    plt.savefig('AccMap_{}_Re{}Se{}Cls{}Pr{}Lt{}{}Tt{}N{}Lr{}'.format(Pred, Reg, seas, clss, Pr, lead_time1, lead_time2,
+                                                                      TTLoco, nodes, str(LR).split('.')[1]), dpi=300)
     plt.show()
+print('Done2')
 
 
 # %% # # # # # # # # #  HEAT MAPS - PLOTTING # # # # # # # # # #
 
 # Specify which class we're interested in plotting
-class_num = 0
+class_num = Reg_dict[Reg][3]
 
 # Make a "total" hmap that can we can divide by to normalize the hmaps
 hmap_main = np.zeros((3, 9))
@@ -651,12 +661,13 @@ for x in np.arange(-1, 2, 1):
         MJO_ENSO = ENSOs.loc[ENSOs['M_Phase'] == y]
         hmap_main[x + 1, y] = len(MJO_ENSO['Index'])
 
+
 # Organize necessary info for hmaps
 for xy in range(counter):
 
     # flatten each list (each seed has own array)
-    flat_idx = np.concatenate(loc_arr[xy]).ravel()     # index
-    flat_CNO = np.concatenate(loc_arrCN[xy]).ravel()   # correct or not?
+    flat_idx = np.concatenate(loc_arr[xy]).ravel()  # index
+    flat_CNO = np.concatenate(loc_arrCN[xy]).ravel()  # correct or not?
     flat_CLS = np.concatenate(loc_arrCLS[xy]).ravel()  # class
 
     # Then combine the lists within our specified region
@@ -687,7 +698,7 @@ for inf in range(len(info_list)):
     # Count indices
     info_count = info_list[inf].groupby(['Index'])['Index'].count()
     info_count_df = info_count.to_frame()
-    info_idx = info_count_df.index                               # Indices
+    info_idx = info_count_df.index  # Indices
     info_counts = info_count_df['Index'].reset_index(drop=True)  # Count
 
     # Convert index and counts into pandas array
@@ -715,9 +726,294 @@ for inf in range(len(info_list)):
     plt.colorbar(shrink=0.75, label='Frequency')
     plt.tight_layout()
     plt.savefig(
-        'Heatmap_{}_{}_Lt{}{}N{}Lr{}'.format(out_names[inf], Pred, lead_time1, lead_time2, nodes, str(LR).split('.')[1]),
-        dpi=300)
+        'Heatmap_{}_{}_Re{}_Lt{}{}Tt{}N{}Lr{}'.format(out_names[inf], Pred, Reg, lead_time1, lead_time2, TTLoco, nodes,
+                                                      str(LR).split('.')[1]), dpi=300)
     plt.show()
+
+# %% Looking at correct and confident samples' inputs
+
+# Only look at samples that were correctly predicted in 75% of the samples
+cidx = class_corr.groupby('Index')['Index'].transform('count')
+class_corr_doop = class_corr[cidx > int(counter*0.75)]
+
+# Only keep one of each of these samples for analysis
+class_corr_drop = class_corr_doop.drop_duplicates()
+
+# Merge to get dates
+corr_conf_datesM = pd.merge(class_corr_drop, idx_all, on='Index')
+
+# Trim the fat
+corr_conf_dates = corr_conf_datesM[['dates', 'obs']]
+print(corr_conf_dates)
+# %%
+
+# Plot all input maps
+proj = ccrs.PlateCarree(central_longitude=180)
+fig, axs = plt.subplots(6, 3, subplot_kw={'projection': proj}, figsize=(11.5, 7.5))
+#fig, axs = plt.subplots(Reg_dict[Reg][4], 3, subplot_kw={'projection': proj}, figsize=(11.5, 7.5))
+
+# axs is a 2 dimensional array of `GeoAxes`.  We will flatten it into a 1-D array
+axs = axs.flatten()
+
+for xmap in range(len(corr_conf_dates['dates'])):
+
+    # lat, lon extents
+    axs[xmap].set_extent([-120, 120, -25, 25], ccrs.PlateCarree(central_longitude=180))
+
+    # Plot
+    clevs = np.arange(-150, 155, 5)
+    cs = axs[xmap].contourf(lons, lats, corr_conf_dates['obs'][xmap], clevs, transform=proj, cmap=plt.cm.bwr,
+                            extend='both')
+
+    # Add extra features
+    axs[xmap].add_feature(cfeature.COASTLINE.with_scale('50m'))
+    axs[xmap].add_feature(cfeature.LAKES.with_scale('50m'), color='black', linewidths=0.5)
+
+fig.subplots_adjust(bottom=0.25, top=0.875, left=0.1, right=0.95, wspace=0.15, hspace=0.02)
+
+# Add a colorbar axis at the bottom of the graph
+cbar_ax = fig.add_axes([0.2, 0.22, 0.6, 0.02])
+cbar = fig.colorbar(cs, cax=cbar_ax, orientation='horizontal')
+cbar.set_label('For Error...\nRed: Obs<UFS & Blue: Obs>UFS', fontsize=20)
+
+# Add a big title at the top
+plt.suptitle('OLR Input Maps of 20% Most Confident Samples\nUFS {}'.format(Reg_dict[Reg][2]), fontsize=26)
+
+# Save
+plt.savefig('InMapAll_{}_Re{}Se{}Cls{}Pr{}Lt{}{}Tt{}N{}Lr{}'.format(Pred, Reg, seas, clss, Pr, lead_time1, lead_time2,
+                                                                TTLoco, nodes, str(LR).split('.')[1]), dpi=300)
+plt.show()
+print('saved')
+
+# %% Take a composite of all maps
+
+# Composite
+corr_conf_avg = corr_conf_dates['obs'].mean()
+
+# Map
+fig = plt.figure(figsize=(10, 8))
+ax = plt.axes(projection=ccrs.PlateCarree(central_longitude=180))
+ax.set_extent([-120, 120, -25, 25], ccrs.PlateCarree(central_longitude=180))  # lat, lon extents
+clevs = np.arange(-80, 85, 5)
+cf = ax.contourf(lons, lats, corr_conf_avg, clevs, cmap=plt.cm.bwr, transform=ccrs.PlateCarree(central_longitude=180))
+cbar = plt.colorbar(cf, orientation='horizontal', pad=0.04, aspect=50, extendrect=True)  # aspect=50 flattens cbar
+ax.add_feature(cfeature.COASTLINE.with_scale('50m'))
+ax.add_feature(cfeature.LAKES.with_scale('50m'), color='black', linewidths=0.5)
+plt.title('OLR Input Map Composite of\n20% Most Confident Samples\nUFS {}'.format(Reg_dict[Reg][2]), fontsize=26)
+plt.savefig('InMapAvg_{}_Re{}Se{}Cls{}Pr{}Lt{}{}Tt{}N{}Lr{}'.format(Pred, Reg, seas, clss, Pr, lead_time1, lead_time2,
+                                                                    TTLoco, nodes, str(LR).split('.')[1]), dpi=300)
+plt.show()
+print('saved2')
+
+# %% Seasonal Out maps
+
+# List of LT avg
+LT_avg = []
+
+# Select season
+pred_szn = 'All'  # 'All', ' Winter', 'Fall', 'Summer', 'Spring'
+corr_conf_szn_all = pd.merge(idx_all, corr_conf_dates, on='dates')
+if pred_szn != 'All':
+    corr_conf_szn = corr_conf_szn_all.loc[corr_conf_szn_all['Season'] == pred_szn]
+else:
+    corr_conf_szn = corr_conf_szn_all
+    pred_szn = ''
+
+# Trim the fat
+corr_conf_pred = corr_conf_szn[['dates']]
+corr_conf_pred = corr_conf_pred.reset_index(drop=True)
+print(corr_conf_pred)
+# define LTs
+LTs = np.arange(1, lead_time2+2)
+
+# Loop through lead times
+for ipred in LTs:
+
+    # Get lead time dates
+    corr_conf_pred['LT{}'.format(ipred)] = corr_conf_pred['dates'] + pd.DateOffset(ipred)
+
+    # Merge with prediction data
+    ccpd = pd.merge(pred_obs, corr_conf_pred, left_on='dates', right_on='LT{}'.format(ipred))
+
+    # Average corr_conf samples
+    LT_avg += [ccpd['{} obs'.format(Pred)].mean()]
+
+# Set-up dataframe
+pred_df_all = pd.DataFrame({'LT': LTs, 'obs avg': LT_avg})
+
+# Repeat process, but for UFS forecast
+
+# List of LT avg
+LT_avg_ufs = []
+
+# Loop through lead times
+for ipred2 in LTs:
+
+    # Set-up value list for each corr & conf samples
+    CC_val = []
+
+    # Loop through corr & conf samples
+    for ipred3 in range(len(corr_conf_pred['dates'])):
+
+        # Grab specific LTs and then the sample that matches that lead time
+        UFS_LT = ds_UFS1_base['{}'.format(Pred)][ipred2::LT_tot].sel(lat=Pred_sliceLat, lon=Pred_sliceLon,
+                                                                     time=corr_conf_pred['dates'][
+                                                                              ipred3] + pd.DateOffset(ipred2))
+
+        # Grab values
+        CC_val += [UFS_LT.values]
+
+    # Average CC_vals and throw it into LT_avg_ufs
+    LT_avg_ufs += [sum(CC_val) / len(CC_val)]
+
+# Put in dataframe with obs
+pred_df_all['ufs avg'] = LT_avg_ufs
+
+# Calculate Error
+pred_df_all['Error'] = pred_df_all['ufs avg'] - pred_df_all['obs avg']
+
+# Output map
+
+# Plot all out maps
+proj = ccrs.PlateCarree(central_longitude=180)
+fig, axs = plt.subplots(3, 3, subplot_kw={'projection': proj}, figsize=(11.5, 8.5))
+
+# axs is a 2 dimensional array of `GeoAxes`.  We will flatten it into a 1-D array
+axs = axs.flatten()
+
+# Helps with map placement
+qmap = [0, 0, 0, 5, 5, 5, 10, 10, 10]
+
+for xpmap in range(9):
+
+    # Set-up
+    axs[xpmap].set_extent([-120, 120, -30, 65], ccrs.PlateCarree(central_longitude=180))
+    clevs = np.arange(-180, 190, 10)
+
+    if xpmap == 0 or xpmap == 3 or xpmap == 6:
+        avg5 = pred_df_all['ufs avg'].iloc[qmap[xpmap]:qmap[xpmap] + 5].mean()
+
+    elif xpmap == 1 or xpmap == 4 or xpmap == 7:
+        avg5 = pred_df_all['obs avg'].iloc[qmap[xpmap]:qmap[xpmap] + 5].mean()
+
+    else:
+        avg5 = pred_df_all['Error'].iloc[qmap[xpmap]:qmap[xpmap] + 5].mean()
+
+    # Plot
+    cs = axs[xpmap].contourf(UFS_LT.lon.values+180, UFS_LT.lat.values, avg5, clevs,
+                             transform=proj, cmap=plt.cm.bwr, extend='both')
+
+    # Column titles
+    ctits = ['UFS Forecast', 'Observations', 'Error (UFS - Obs)']
+    if xpmap < 3:
+        axs[xpmap].set_title('{}'.format(ctits[xpmap]), fontsize=16)
+
+    '''# LT labels
+    if xpmap == 0 or xpmap == 3 or xpmap == 6:
+        axs[xpmap].set_ylabel('LT\n{}-{}'.format(qmap[xpmap] + 1, qmap[xpmap] + 5), rotation=0, fontsize=15)'''
+
+    # Add extra features
+    axs[xpmap].add_feature(cfeature.COASTLINE.with_scale('50m'))
+    axs[xpmap].add_feature(cfeature.LAKES.with_scale('50m'), color='black', linewidths=0.5)
+
+# Add a colorbar axis at the bottom of the graph
+fig.subplots_adjust(bottom=0.25, top=0.875, left=0.1, right=0.95, wspace=0.15, hspace=0.02)
+cbar_ax = fig.add_axes([0.2, 0.22, 0.6, 0.02])
+cbar = fig.colorbar(cs, cax=cbar_ax, orientation='horizontal')
+cbar.set_label('For Error...\nRed: UFS>Obs & Blue: UFS<Obs', fontsize=20)
+
+# Add a big title at the top
+plt.suptitle('OLR Output Maps of 20% Most Confident Samples\nUFS {} - {}'.format(Reg_dict[Reg][2], pred_szn),
+             fontsize=26)
+
+# Save
+plt.savefig('OutMap_{}_Re{}Se{}Cls{}Pr{}Lt{}{}Tt{}N{}Lr{}{}'.format(Pred, Reg, seas, clss, Pr, lead_time1,
+                                                                    lead_time2, TTLoco, nodes, str(LR).split('.')[1],
+                                                                    pred_szn), dpi=300)
+plt.show()
+print('saved3')
+
+# %% Look at individual out samples in time (w/ & w/0 u/v winds)
+corr_conf_idv = corr_conf_datesM[['dates', 'obs', 'Index']]
+
+# Get obs
+pred_obs_map = pd.merge(pred_obs, corr_conf_idv, on='dates')
+
+for omap1 in range(len(pred_obs_map['Index'])):
+
+    # idx_counter accounts for validation data occurring after training & that the UFS forecasts are every 35 days
+    idx_counter = (bignum * LT_tot) + (int(pred_obs_map['Index'][omap1]) * LT_tot)
+    idx_counter_obs = (bignum + int(pred_obs_map['Index'][omap1])) * 7 + 4
+
+    # For each sample, get their UFS leads out to 15
+    outufs = ds_UFS1_base['{}'.format(Pred)].sel(lat=Pred_sliceLat, lon=Pred_sliceLon)[idx_counter:idx_counter+14]
+    outobs = ds_obs1_base['{}'.format(Pred)].sel(lat=Pred_sliceLat, lon=Pred_sliceLon)[
+             idx_counter_obs:idx_counter_obs + 14]
+    outu = dfu['u_3'].sel(lat=Pred_sliceLat, lon=Pred_sliceLon)[idx_counter_obs:idx_counter_obs + 14]
+    outv = dfv['v_3'].sel(lat=Pred_sliceLat, lon=Pred_sliceLon)[idx_counter_obs:idx_counter_obs + 14]
+
+    # set-up lats/lons
+    outlon = outufs.lon.values + 180
+    outlat = outufs.lat.values
+    lonmesh, latmesh = np.meshgrid(outlon, outlat)
+
+    # Set-up map
+    proj = ccrs.PlateCarree(central_longitude=180)
+    fig, axs = plt.subplots(14, 3, subplot_kw={'projection': proj}, figsize=(11.5, 15.5))
+    axs = axs.flatten()
+    clevs = np.arange(-180, 190, 10)
+
+    # Grab values for each date
+    for omap2 in range(len(outufs.time.values)*3):
+
+        # Set extents
+        axs[omap2].set_extent([-120, 120, -30, 65], ccrs.PlateCarree(central_longitude=180))
+
+        # Plot ufs map
+        if (omap2 + 3) % 3 == 0:
+            cs = axs[omap2].contourf(outlon, outlat, outufs[int(omap2 / 3)].values, clevs,
+                                     transform=proj, cmap=plt.cm.bwr, extend='both')
+
+        # Plot obs map (w/ winds)
+        elif (omap2 + 3) % 3 == 1:
+            cs = axs[omap2].contourf(outlon, outlat, outobs[int(omap2 / 3)].values, clevs, transform=proj,
+                                     cmap=plt.cm.bwr, extend='both')
+            axs[omap2].quiver(lonmesh[::7, ::7], latmesh[::7, ::7], outu[int(omap2 / 3)].values[::7, ::7],
+                              outv[int(omap2 / 3)].values[::7, ::7])
+
+        # Plot error
+        else:
+            err = outufs[int(omap2 / 3)].values - outobs[int(omap2 / 3)].values
+            cs = axs[omap2].contourf(outlon, outlat, err,clevs, transform=proj, cmap=plt.cm.bwr, extend='both')
+
+        # Column titles
+        ctits = ['UFS Forecast', 'Observations', 'Error (UFS - Obs)']
+        if omap2 < 3:
+            axs[omap2].set_title('{}'.format(ctits[omap2]), fontsize=16)
+
+        # Add extra features
+        axs[omap2].add_feature(cfeature.COASTLINE.with_scale('50m'))
+        axs[omap2].add_feature(cfeature.LAKES.with_scale('50m'), color='black', linewidths=0.5)
+
+    # Add a colorbar axis at the bottom of the graph
+    fig.subplots_adjust(bottom=0.25, top=0.9, left=0.1, right=0.95, wspace=0.15, hspace=0.15)
+    cbar_ax = fig.add_axes([0.2, 0.22, 0.6, 0.02])
+    cbar = fig.colorbar(cs, cax=cbar_ax, orientation='horizontal')
+    cbar.set_label('For Error...\nRed: UFS>Obs & Blue: UFS<Obs', fontsize=20)
+
+    # Add a big title at the top
+    plt.suptitle('OLR Output Map Sample {}\nUFS {}'.format(int(pred_obs_map['Index'][omap1]),
+                                                           Reg_dict[Reg][2]), fontsize=26)
+
+    # Save
+    plt.savefig('OutMap{}_{}_Re{}Cls{}Pr{}Lt{}{}Tt{}N{}Lr{}'.format(int(pred_obs_map['Index'][omap1]), Pred, Reg,
+                                                                    clss, Pr, lead_time1, lead_time2, TTLoco, nodes,
+                                                                    str(LR).split('.')[1],
+                                                                    pred_szn), dpi=300)
+
+    plt.show()
+    print(omap1)
+print('saved 4')
 
 # %% # # # # # # # # #  EXTRA STUFF # # # # # # # # # #
 
@@ -837,4 +1133,3 @@ ax.add_feature(cfeature.COASTLINE.with_scale('50m'))
 ax.add_feature(cfeature.LAKES.with_scale('50m'), color='black', linewidths=0.5)
 plt.savefig('del')
 plt.show()'''
-
